@@ -175,6 +175,7 @@ struct binder_work {
 /* binder_node 用来描述一个 Binder 实体对象，每一个Service组件在Binder驱动中都对应有一个Binder实体对象，
  * 用来描述它在内核中的状态。Binder驱动程序通过强引用计数和弱引用计数来维护它们的生命周期。 */
 struct binder_node {
+	// debug_id 用来标志一个Binder实体对象的身份，用来帮助调试Binder驱动程序的;
 	int debug_id;
 	struct binder_work work;
 	union {
@@ -200,7 +201,10 @@ struct binder_node {
 	unsigned pending_weak_ref : 1;
 	// has_aync_transaction 用来描述一个Binder实体对象是否正在处理一个异步事务;(1:是;0:否)
 	unsigned has_async_transaction : 1;
+	// accept_fds 用来描述一个Binder实体对象是否可以接收包含有文件描述符的进程间通信数据.(1:可以接收;other:禁止接收)
 	unsigned accept_fds : 1;
+	// min_priority 表示一个Binder实体对象在处理一个来自Client进程的请求时，它所要求的处理线程，
+	// 即Server进程中的一个线程，应该具备的最小线程优先级;
 	int min_priority : 8;
 	// 异步事务队列是由该目标Binder实体对象的成员变量async_todo描述的;
 	// 异步事务定义的那些单向的进程间通信请求，即不需要等待应答的进程间通信请求，与此相对的便是同步事务。
@@ -209,11 +213,25 @@ struct binder_node {
 	struct list_head async_todo;
 };
 
+// 用来描述一个Service组件的死亡接收通知;
+// Binder驱动程序决定要向一个Client进程发送一个Service组件死亡通知时，会将一个 binder_ref_death 结构体封装成一个工作项，并且根据实际情况来设置该结构体的成员变量work的值,
+// 最后将这个工作项添加到Client进程的todo队列中去等待处理;
+// Binder驱动在下面两种情况下，会向一个Client进程发送一个Service组件的死亡通知;
+// --> (1),当Binder驱动程序监测到一个Service组件死亡时，它就会找到该Service组件对应的Binder实体对象,然后通知Binder实体对象的成员refs就可以找到所有引用了它的Client进程,
+//			最后就找到了这些Client进程所注册的死亡接收通知，即一个binder_ref_death结构体。这时候Binder驱动程序就会将该 binder_ref_death 结构体添加到 Client 进程的 todo
+// 			队列中去等待处理。并将死亡通知的类型设置为: BINDER_WORK_DEAD_BINDER;
+// --> (2),当Client进程向Binder驱动程序注册一个死亡接收通知时，如果它所引用的Service组件已经死亡，那么Binder驱动程序就会马上发送一个死亡通知给该Client进程。在这种情况下，
+//			Binder驱动程序也会将死亡通知的类型设置为: BINDRE_WORK_DEAD_BINDER.
+// --> (3),当Client进程向Binder驱动程序注销一个死亡通知时，Binder驱动程序也会向该Client进程的todo队列发送一个类型为 binder_ref_death 的工作项，用来表示注销结果。
 struct binder_ref_death {
+	// work的取值为: BINDER_WORK_DEAD_BINDER, BINDER_WORK_CLEAR_DEATH_NOTIFICATION, BINDER_WORKER_DEAD_BINDER_AND_CLEAR，用来标志一个具体的死亡通知类型。
 	struct binder_work work;
+	// cookie 保存负责接收死亡通知的对象的地址;
 	void __user *cookie;
 };
 
+// binder_ref 用来描述一个Binder引用对象，每一个Client组件在Binder驱动程序中都对应有一个Binder引用对象，用来描述它在内核中的状态。
+// Binder驱动程序通过强引用计数和弱引用计数来维护它们的生命周期;
 struct binder_ref {
 	/* Lookups needed: */
 	/*   node + proc => ref (transaction) */
@@ -223,28 +241,41 @@ struct binder_ref {
 	struct rb_node rb_node_desc;
 	struct rb_node rb_node_node;
 	struct hlist_node node_entry;
+	// proc 指向一个Binder引用对象的宿主进程;
 	struct binder_proc *proc;
+	// node 用来描述一个 Binder 引用对象所引用的 Binder 实体对象;
 	struct binder_node *node;
+	// desc是一个句柄值,描述一个Binder引用对象;
 	uint32_t desc;
+	// strong 描述一个Binder引用对象的强引用计数,Binder驱动通过它来维护一个Binder引用对象的生命周期;
 	int strong;
+	// weak 描述一个Binder引用对象的弱引用计数,Binder驱动通过它来维护一个Binder引用对象的生命周期;
 	int weak;
+	// death指向一个Service组件的死亡接收通知;
 	struct binder_ref_death *death;
 };
 
+// binder_buffer 描述一个内核缓冲区,用来在进程间传输数据;
 struct binder_buffer {
 	struct list_head entry; /* free and allocated entries by addesss */
 	struct rb_node rb_node; /* free entry by size or allocated entry */
 				/* by address */
+	// 如果一个内核缓冲区是空闲的，那free的值等于1;
 	unsigned free : 1;
+	// 在Service组件处理完成该事务之后，如果发现 allow_user_free 的值为1，那么该Service组件就会请求Binder驱动程序释放该内核缓冲区;
 	unsigned allow_user_free : 1;
+	// async_transaction 为1，则说明为一个异步事务;
 	unsigned async_transaction : 1;
 	unsigned debug_id : 29;
 
+	// binder_transaction 和 binder_node 用来描述一个内核缓冲区正在交给哪一个事务以及哪一个Binder实体对象使用;
 	struct binder_transaction *transaction;
-
 	struct binder_node *target_node;
+
 	size_t data_size;
 	size_t offsets_size;
+	// data 指向一块大小可变的数据缓冲区，它是真正用来保存通信数据的。
+	// 数据缓冲区保存的数据分为两种: 一种是普通数据，另一种是Binder对象;
 	uint8_t data[0];
 };
 
@@ -254,36 +285,57 @@ enum {
 	BINDER_DEFERRED_RELEASE      = 0x04,
 };
 
+// binder_proc 描述一个正在使用Binder进程间通信机制的进程;
+// 当一个进程调用函数open来打开设备文件/dev/binder时，Binder驱动程序就会为它创建一个binder_proc结构体，
+// 并且将它保存在一个全局的 hash 列表中，而成员变量 proc_node 就正好是该 hash 列表中的一个节点。
+// 成员变量pid、tsk和files分别指向了进程的进程组ID、任务控制块和打开文件结构体数组;
 struct binder_proc {
 	struct hlist_node proc_node;
+	// threads是一个红黑树的根节点,它以线程ID作为关键字来组织一个进程的Binder线程池;
 	struct rb_root threads;
+	// nodes 所描述的红黑树是用来组织Binder实体对象的，它以Binder实体对象的成员ptr作为关键字;
 	struct rb_root nodes;
+	// refs_by_desc 描述的红黑树用来组织Binder引用对象，它以Binder引用对象的成员desc作为关键字;
 	struct rb_root refs_by_desc;
+	// refs_by_node 描述的红黑树用来组织Binder引用对象，它以Binder引用对象的成员node作为关键字;
 	struct rb_root refs_by_node;
 	int pid;
+	// 用户空间地址是在应用程序进程内部使用的，保存在成员变量vma中;
 	struct vm_area_struct *vma;
 	struct task_struct *tsk;
 	struct files_struct *files;
+	// deferred_work_node 是一个hash列表，用来保存进程可以延迟执行的工作项;
 	struct hlist_node deferred_work_node;
+	// 描述延迟工作项的具体类型;
 	int deferred_work;
+	// buffer 保存内核空间地址，在Binder驱动程序内部使用;
 	void *buffer;
+	// 内核空间地址和用户空间地址的偏移值;
 	ptrdiff_t user_buffer_offset;
 
 	struct list_head buffers;
 	struct rb_root free_buffers;
 	struct rb_root allocated_buffers;
+	// free_async_space 保存了当前可以用来保存异步事务数据的内核缓冲区的大小;
 	size_t free_async_space;
 
 	struct page **pages;
+	// Binder驱动程序为进程分配的内核缓冲区的大小保存在成员变量buffer_size中;
 	size_t buffer_size;
+	// buffer_free 保存了空闲内核缓冲区的大小;
 	uint32_t buffer_free;
+	// 待处理工作项队列;
 	struct list_head todo;
 	wait_queue_head_t wait;
+	// stats 用来统计进程数据，例如接收到的进程间通信请求的次数;
 	struct binder_stats stats;
+	// 死亡通知队列;
 	struct list_head delivered_death;
+	// Binder驱动程序最多可以主动请求进程注册的线程的数量保存在成员变量max_threads中;
 	int max_threads;
 	int requested_threads;
 	int requested_threads_started;
+	// ready_threads 表示进程当前的空闲Binder线程数目;
 	int ready_threads;
 	long default_priority;
 };
@@ -297,10 +349,16 @@ enum {
 	BINDER_LOOPER_STATE_NEED_RETURN = 0x20
 };
 
+// binder_thread 用来描述Binder线程池中的一个线程;
+// 一个线程注册到Binder驱动程序时，Binder驱动程序就会为它创建一个binder_thread结构体;
 struct binder_thread {
+	// proc 指向其宿主进程；
 	struct binder_proc *proc;
+	// Binder线程池中的一个(红黑树)节点;
 	struct rb_node rb_node;
+	// Binder线程的ID;
 	int pid;
+	// Binder线程的状态;
 	int looper;
 	struct binder_transaction *transaction_stack;
 	struct list_head todo;
