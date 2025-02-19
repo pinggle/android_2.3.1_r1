@@ -159,8 +159,9 @@ static struct binder_transaction_log_entry *binder_transaction_log_add(
 	return e;
 }
 
+/* binder_work 用来描述待处理的工作项，这些工作项有可能属于一个进程，也有可能属于一个进程中的某一个线程。*/
 struct binder_work {
-	struct list_head entry;
+	struct list_head entry; /* 用来将该结构体嵌入到一个宿主结构中; */
 	enum {
 		BINDER_WORK_TRANSACTION = 1,
 		BINDER_WORK_TRANSACTION_COMPLETE,
@@ -168,7 +169,7 @@ struct binder_work {
 		BINDER_WORK_DEAD_BINDER,
 		BINDER_WORK_DEAD_BINDER_AND_CLEAR,
 		BINDER_WORK_CLEAR_DEATH_NOTIFICATION,
-	} type;
+	} type; /* 用来描述工作项的类型; Binder驱动程序根据 type 的值，可以判断出一个 binder_work 结构体嵌入到什么类型的宿主结构中. */
 };
 
 struct binder_node {
