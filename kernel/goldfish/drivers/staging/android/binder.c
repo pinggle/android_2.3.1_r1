@@ -159,7 +159,7 @@ static struct binder_transaction_log_entry *binder_transaction_log_add(
 	return e;
 }
 
-/* binder_work 用来描述待处理的工作项，这些工作项有可能属于一个进程，也有可能属于一个进程中的某一个线程。*/
+// binder_work 用来描述待处理的工作项，这些工作项有可能属于一个进程，也有可能属于一个进程中的某一个线程。
 struct binder_work {
 	struct list_head entry; /* 用来将该结构体嵌入到一个宿主结构中; */
 	enum {
@@ -172,6 +172,8 @@ struct binder_work {
 	} type; /* 用来描述工作项的类型; Binder驱动程序根据 type 的值，可以判断出一个 binder_work 结构体嵌入到什么类型的宿主结构中. */
 };
 
+/* binder_node 用来描述一个 Binder 实体对象，每一个Service组件在Binder驱动中都对应有一个Binder实体对象，
+ * 用来描述它在内核中的状态。Binder驱动程序通过强引用计数和弱引用计数来维护它们的生命周期。 */
 struct binder_node {
 	int debug_id;
 	struct binder_work work;
@@ -179,20 +181,31 @@ struct binder_node {
 		struct rb_node rb_node;
 		struct hlist_node dead_node;
 	};
+	/* proc 指向一个Binder实体对象的宿主进程。*/
 	struct binder_proc *proc;
 	struct hlist_head refs;
+	// 用来描述一个Binder实体对象的强引用计数;
 	int internal_strong_refs;
+	// 用来描述一个Binder实体对象的弱引用计数;
 	int local_weak_refs;
 	int local_strong_refs;
+	// ptr和cookie分别指向一个用户空间地址，它们用来描述用户空间中的一个Service组件;
+	// cookie 指向该Service组件的地址;
+	// ptr 指向该 Service 组件内部的一个引用计数对象（类型为weakref_impl）的地址。
 	void __user *ptr;
 	void __user *cookie;
 	unsigned has_strong_ref : 1;
 	unsigned pending_strong_ref : 1;
 	unsigned has_weak_ref : 1;
 	unsigned pending_weak_ref : 1;
+	// has_aync_transaction 用来描述一个Binder实体对象是否正在处理一个异步事务;(1:是;0:否)
 	unsigned has_async_transaction : 1;
 	unsigned accept_fds : 1;
 	int min_priority : 8;
+	// 异步事务队列是由该目标Binder实体对象的成员变量async_todo描述的;
+	// 异步事务定义的那些单向的进程间通信请求，即不需要等待应答的进程间通信请求，与此相对的便是同步事务。
+	// 因为不需要等待应答，Binder驱动程序就认为异步事务的优先级低于同步事务，具体就表现为在同一时刻，
+	// 一个Binder实体对象的所有异步事务至多只有一个会得到处理，其余的都等待在异步事务队列中;
 	struct list_head async_todo;
 };
 
