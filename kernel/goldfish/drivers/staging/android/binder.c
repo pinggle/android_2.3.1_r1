@@ -351,6 +351,9 @@ enum {
 
 // binder_thread 用来描述Binder线程池中的一个线程;
 // 一个线程注册到Binder驱动程序时，Binder驱动程序就会为它创建一个binder_thread结构体;
+// 一个线程注册到Binder驱动程序后，它接着就会通过 BC_REGISTER_LOOPER（Binder驱动请求创建） 或者 BC_ENTER_LOOPER (主动注册) 协议来通知Binder驱动程序，
+// 它可以处理进程间通信请求了，
+// 当一个Binder线程退出时，它会通过 BC_EXIT_LOOPER 协议来通知Binder驱动程序;
 struct binder_thread {
 	// proc 指向其宿主进程；
 	struct binder_proc *proc;
@@ -360,16 +363,21 @@ struct binder_thread {
 	int pid;
 	// Binder线程的状态;
 	int looper;
+	// 当Binder驱动程序决定将一个事务交给一个Binder线程处理时，它就会将该事务封装成一个 binder_transaction 结构体，并且
+	// 将它添加到由线程结构体 binder_thread 的成员变量 transaction_stack 所描述的一个事务堆栈中;
 	struct binder_transaction *transaction_stack;
 	struct list_head todo;
 	uint32_t return_error; /* Write failed, return error code in read buf */
 	uint32_t return_error2; /* Write failed, return error code in read */
 		/* buffer. Used when sending a reply to a dead process that */
 		/* we are also waiting on */
+	// 当一个Binder线程在处理一个事务T1并需要依赖于其他的Binder线程来处理另一个事务T2时，
+	// 它就会睡眠在由成员变量wait所描述的一个等待队列中，直到事务T2处理完成为止;
 	wait_queue_head_t wait;
 	struct binder_stats stats;
 };
 
+// binder_transaction 用来描述进程间通信过程，这个过程又称为一个事务;
 struct binder_transaction {
 	int debug_id;
 	struct binder_work work;
@@ -968,6 +976,12 @@ binder_get_node(struct binder_proc *proc, void __user *ptr)
 	return NULL;
 }
 
+/* 函数 binder_new_node 为 Service Manager 创建一个 Binder 实体对象;
+ * 第一个参数 proc 用来描述 Service Manager 进程;
+ * ptr : 用来指向 Binder 本地对象内部的一个弱引用计数对象的地址值;
+ * cookie : 用来指向 Binder 本地对象的地址值;
+ * 由于与 Service Manager 对象的Binder本地对象的地址值为0，因此 ptr 和 cookie 均被指定为 NULL; 
+ */
 static struct binder_node *
 binder_new_node(struct binder_proc *proc, void __user *ptr, void __user *cookie)
 {
@@ -975,6 +989,9 @@ binder_new_node(struct binder_proc *proc, void __user *ptr, void __user *cookie)
 	struct rb_node *parent = NULL;
 	struct binder_node *node;
 
+	// while 循环以参数 ptr 为关键字，在这个红黑树中检查前面是否已经为参数 ptr 和 cookie 所描述的 Binder 本地对象
+	// 创建过 Binder 实体对象，如果已经创建过，则直接返回一个 NULL 值给调用者; 否则就创建一个新的 Binder 实体对象,
+	// 并且对它进行初始化，最后将它加入到其宿主进程的成员变量 nodes 所描述的一个红黑树中;
 	while (*p) {
 		parent = *p;
 		node = rb_entry(parent, struct binder_node, rb_node);
@@ -1802,6 +1819,9 @@ binder_transaction_buffer_release(struct binder_proc *proc, struct binder_buffer
 	}
 }
 
+/* 函数 binder_thread_write 处理 BC_ENTER_LOOPER 协议;
+ *
+ */
 int
 binder_thread_write(struct binder_proc *proc, struct binder_thread *thread,
 		    void __user *buffer, int size, signed long *consumed)
@@ -2019,6 +2039,8 @@ binder_thread_write(struct binder_proc *proc, struct binder_thread *thread,
 			thread->looper |= BINDER_LOOPER_STATE_REGISTERED;
 			break;
 		case BC_ENTER_LOOPER:
+			// 将目标线程 thread 的状态设置为 BINDER_LOOPER_STATE_ENTERED，
+			// 以表明该线程是一个 Binder 线程，可以处理进程间通信请求;
 			if (binder_debug_mask & BINDER_DEBUG_THREADS)
 				printk(KERN_INFO "binder: %d:%d BC_ENTER_LOOPER\n",
 				       proc->pid, thread->pid);
@@ -2194,15 +2216,30 @@ binder_stat_br(struct binder_proc *proc, struct binder_thread *thread, uint32_t 
 	}
 }
 
+/* 
+ * binder_has_proc_work 用来判断一个进程是否有未处理的工作项;
+ */
 static int
 binder_has_proc_work(struct binder_proc *proc, struct binder_thread *thread)
 {
+	// 如果一个进程的 todo 队列不为空，那么就说明它有未处理的工作项，因此，函数的返回值就等于1;
+	// 另外，如果当前线程的状态被设置为 BINDER_LOOPER_STATE_NEED_RETURN，那么就表示当前线程需要马上返回到用户空间;
+	// 因此，这时候函数的返回值也会等于1，防止当期线程进入睡眠等待状态;
 	return !list_empty(&proc->todo) || (thread->looper & BINDER_LOOPER_STATE_NEED_RETURN);
 }
 
+/*
+ * binder_has_thread_work 用来判断一个线程是否有未处理的工作项;
+ */
 static int
 binder_has_thread_work(struct binder_thread *thread)
 {
+	// 如果一个进程的 todo 队列不为空，那么就说明它有未处理的工作项，因此，函数的返回值就等于1;
+	// 另外，如果当前线程的状态被设置为 BINDER_LOOPER_STATE_NEED_RETURN，那么就表示当前线程需要马上返回到用户空间;
+	// 因此，这时候函数的返回值也会等于1，防止当期线程进入睡眠等待状态;
+	// 还有一种情况，即它上次在 Binder 驱动程序中处理某一个工作项时出现了错误，这时候 Binder 驱动程序就会将相应的错误代码
+	// (不等于BR_OK) 设置到对应的 binder_thread 结构体的成员变量 return_error 中，这种情况下，函数也会返回1，
+	// 防止它进入睡眠等待状态;
 	return !list_empty(&thread->todo) || thread->return_error != BR_OK ||
 		(thread->looper & BINDER_LOOPER_STATE_NEED_RETURN);
 }
@@ -2224,6 +2261,9 @@ binder_thread_read(struct binder_proc *proc, struct binder_thread *thread,
 	}
 
 retry:
+	// 检查当前线程的事务堆栈 transaction_stack 是否为 NULL，以及 todo 队列是否为空。
+	// 如果两个条件都成立，即两者都为空，就将变量 wait_for_proc_work 的值设置为 1;
+	// 表示它接下来要检查它所属进程的 todo 队列中是否有未处理的工作项，否则，接下来就要优先处理自己的事务或工作项了。
 	wait_for_proc_work = thread->transaction_stack == NULL && list_empty(&thread->todo);
 
 	if (thread->return_error != BR_OK && ptr < end) {
@@ -2242,8 +2282,10 @@ retry:
 		goto done;
 	}
 
-
+	// 先将当前线程的状态设置为 BINDER_LOOPER_STATE_WAITING，表示该线程正处于空闲状态;
 	thread->looper |= BINDER_LOOPER_STATE_WAITING;
+	// 如果 wait_for_proc_work 为 1，说明当期那线程所属的进程又多了一个空闲 Binder 线程;
+	// 将该进程的空闲 Binder 线程数 ready_threads 加 1;
 	if (wait_for_proc_work)
 		proc->ready_threads++;
 	mutex_unlock(&binder_lock);
@@ -2256,14 +2298,22 @@ retry:
 				proc->pid, thread->pid, thread->looper);
 			wait_event_interruptible(binder_user_error_wait, binder_stop_on_user_error < 2);
 		}
+		// binder_set_nice 将当前线程的优先级设置为它所属进程的优先级;
+		// 这是因为如果它所属的进程有未处理的工作项，它就需要代表该进程去处理这个工作项;
 		binder_set_nice(proc->default_priority);
+		// non_block 表示当前线程是否以非阻塞模式打开设备文件 /dev/binder;
+		// 如果是，就表示当前线程不可以在 Binder 驱动程序中睡眠;
+		// 即如果当前线程发现其所属进程的 todo 队列为空时，它不可以进入睡眠状态去等待该进程有新的未处理工作项;
 		if (non_block) {
+			// binder_has_proc_work 用来判断一个进程是否有未处理的工作项;
 			if (!binder_has_proc_work(proc, thread))
 				ret = -EAGAIN;
 		} else
+			// 调用 wait_event_interruptible_exclusive 来睡眠等待直到其所属的进程有新的未处理工作项为止;
 			ret = wait_event_interruptible_exclusive(proc->wait, binder_has_proc_work(proc, thread));
 	} else {
 		if (non_block) {
+			// binder_has_thread_work 判断一个线程是否有未处理的工作项;
 			if (!binder_has_thread_work(thread))
 				ret = -EAGAIN;
 		} else
@@ -2272,11 +2322,13 @@ retry:
 	mutex_lock(&binder_lock);
 	if (wait_for_proc_work)
 		proc->ready_threads--;
+	// 如果Binder驱动程序发现当前线程有新的工作项需要处理时，将它的状态位 BINDER_LOOPER_STATE_WAITING 清空;
 	thread->looper &= ~BINDER_LOOPER_STATE_WAITING;
 
 	if (ret)
 		return ret;
 
+	// 当前线程被唤醒后，会调用下面 while 循环来处理它的工作项;
 	while (1) {
 		uint32_t cmd;
 		struct binder_transaction_data tr;
@@ -2478,6 +2530,12 @@ retry:
 
 done:
 
+	// 检查是否需要请求当前线程所属的进程 proc 增加一个新的 Binder 线程来处理进程间通信请求。
+	// 如果满足以下 4 个条件，就是将一个返回协议代码 BR_SPAWN_LOOPER 写入到用户空间缓冲区 buffer 中，
+	// 以便进程 proc 可以创建一个新的线程加入到它的 Binder 线程池中。
+	// (1) 进程 proc 的空闲线程数 ready_threads 等于0;
+	// (2) Binder驱动程序当前不是正在请求进程proc增加一个新的Binder线程，即它的成员变量 requested_threads 的值等于0;
+
 	*consumed = ptr - buffer;
 	if (proc->requested_threads + proc->ready_threads == 0 &&
 	    proc->requested_threads_started < proc->max_threads &&
@@ -2517,12 +2575,19 @@ static void binder_release_work(struct list_head *list)
 
 }
 
+// 函数 binder_get_thread 在为一个线程创建一个 binder_thread 结构体之前，首先会检查与该线程所对应的
+// binder_thread 结构体是否已经存在，如果存在，就不用创建了，可直接将该 binder_thread 结构体返回给调用者;
 static struct binder_thread *binder_get_thread(struct binder_proc *proc)
 {
 	struct binder_thread *thread = NULL;
 	struct rb_node *parent = NULL;
 	struct rb_node **p = &proc->threads.rb_node;
 
+	// 一个进程的所有 Binder 线程都保存在一个 binder_proc 结构体的成员变量 threads 所描述的一个红黑树中;
+	// 由于这个红黑树是以线程的 PID 为关键字来组织的，因此下面的 while 循环就以当前线程的 pid 在这个红黑树中
+	// 查找是否已经存在一个对应的 binder_thread 结构体。如果不存在，即最后得到的红黑树节点 p 为NULL，那么就为
+	// 当前线程创建一个 binder_thread 结构体，并且对它进行初始化，然后再将它添加到其宿主进程的成员变量 threads
+	// 所描述的一个红黑树中;
 	while (*p) {
 		parent = *p;
 		thread = rb_entry(parent, struct binder_thread, rb_node);
@@ -2621,6 +2686,7 @@ static unsigned int binder_poll(struct file *filp, struct poll_table_struct *wai
 static long binder_ioctl(struct file *filp, unsigned int cmd, unsigned long arg)
 {
 	int ret;
+	// 获取前面Binder驱动程序为 Service Manager 进程创建的一个 binder_proc 结构体，保存到 proc 中;
 	struct binder_proc *proc = filp->private_data;
 	struct binder_thread *thread;
 	unsigned int size = _IOC_SIZE(cmd);
@@ -2633,6 +2699,8 @@ static long binder_ioctl(struct file *filp, unsigned int cmd, unsigned long arg)
 		return ret;
 
 	mutex_lock(&binder_lock);
+	// 调用 binder_get_thread 为当前线程创建一个 binder_thread 结构体;
+	// 当前线程即为 Service Manager 进程的主线程，同时它也是 Service Manager进程中的一个 Binder 线程。
 	thread = binder_get_thread(proc);
 	if (thread == NULL) {
 		ret = -ENOMEM;
@@ -2646,6 +2714,7 @@ static long binder_ioctl(struct file *filp, unsigned int cmd, unsigned long arg)
 			ret = -EINVAL;
 			goto err;
 		}
+		// 将从用户空间传进来的一个 binder_write_read 结构体复制出来，并且保存在变量 bwr 中;
 		if (copy_from_user(&bwr, ubuf, sizeof(bwr))) {
 			ret = -EFAULT;
 			goto err;
@@ -2653,6 +2722,7 @@ static long binder_ioctl(struct file *filp, unsigned int cmd, unsigned long arg)
 		if (binder_debug_mask & BINDER_DEBUG_READ_WRITE)
 			printk(KERN_INFO "binder: %d:%d write %ld at %08lx, read %ld at %08lx\n",
 			       proc->pid, thread->pid, bwr.write_size, bwr.write_buffer, bwr.read_size, bwr.read_buffer);
+		// 传递进来的输入缓冲区长度大于0,输出缓冲区等于0，因此下面的判断结果为 true;
 		if (bwr.write_size > 0) {
 			ret = binder_thread_write(proc, thread, (void __user *)bwr.write_buffer, bwr.write_size, &bwr.write_consumed);
 			if (ret < 0) {
@@ -2662,6 +2732,7 @@ static long binder_ioctl(struct file *filp, unsigned int cmd, unsigned long arg)
 				goto err;
 			}
 		}
+		// 输出缓冲区为0，因此下面的判断结果为 false;
 		if (bwr.read_size > 0) {
 			ret = binder_thread_read(proc, thread, (void __user *)bwr.read_buffer, bwr.read_size, &bwr.read_consumed, filp->f_flags & O_NONBLOCK);
 			if (!list_empty(&proc->todo))
@@ -2688,12 +2759,17 @@ static long binder_ioctl(struct file *filp, unsigned int cmd, unsigned long arg)
 		}
 		break;
 	case BINDER_SET_CONTEXT_MGR:
+		// binder_context_mgr_node 用来描述与 Binder 进程间通信机制的上下文管理者相对应的一个Binder实体对象;
+		// 如果它不为 NULL，说明前面已经有组件将自己注册为 Binder 进程间通信机制的上下文管理者了;
 		if (binder_context_mgr_node != NULL) {
 			printk(KERN_ERR "binder: BINDER_SET_CONTEXT_MGR already set\n");
 			ret = -EBUSY;
 			goto err;
 		}
+		// binder_context_mgr_uid 用来描述注册了 Binder 进程通信机制的上下文管理者的进程的有效用户ID;
+		// 如果它不等于 -1 , 说明前面已经有一个进程注册了 Binder 进程间通信机制的上下文管理者了;
 		if (binder_context_mgr_uid != -1) {
+			// 检查当前进程的有效用户ID是否等于全局变量 binder_context_mgr_uid;
 			if (binder_context_mgr_uid != current->cred->euid) {
 				printk(KERN_ERR "binder: BINDER_SET_"
 				       "CONTEXT_MGR bad uid %d != %d\n",
@@ -2704,15 +2780,23 @@ static long binder_ioctl(struct file *filp, unsigned int cmd, unsigned long arg)
 			}
 		} else
 			binder_context_mgr_uid = current->cred->euid;
+		
+		// 调用 binder_new_node 为 Service Manager 创建一个 Binder 实体对象,
+		// 并将它保存在全局变量 binder_context_mgr_node 中;
 		binder_context_mgr_node = binder_new_node(proc, NULL, NULL);
 		if (binder_context_mgr_node == NULL) {
 			ret = -ENOMEM;
 			goto err;
 		}
+		// 为刚创建的 Binder 实体对象的内部引用计数 local_weak_refs 和 local_strong_refs 自增为1，
+		// 避免 Binder 驱动程序将其释放;
 		binder_context_mgr_node->local_weak_refs++;
 		binder_context_mgr_node->local_strong_refs++;
+		// 将 Binder 实体对象的 has_strong_ref 和 has_weak_ref 设置为1，表示Binder驱动程序已经请求
+		// Service Manager 进程增加 Service manager 组件的强引用计数和弱引用计数了;
 		binder_context_mgr_node->has_strong_ref = 1;
 		binder_context_mgr_node->has_weak_ref = 1;
+		// 到这里, Service Manager 就成功地将自己注册为 Binder 进程间通信机制的上下文管理者了;
 		break;
 	case BINDER_THREAD_EXIT:
 		if (binder_debug_mask & BINDER_DEBUG_THREADS)
@@ -2738,6 +2822,8 @@ static long binder_ioctl(struct file *filp, unsigned int cmd, unsigned long arg)
 	ret = 0;
 err:
 	if (thread)
+		// 将 BINDER_LOOPER_STATE_NEED_RETURN 状态位清零，这样当该线程下次再进入到 Binder 驱动程序时，
+		// Binder 驱动程序就可以将进程间通信请求分发给它处理了.
 		thread->looper &= ~BINDER_LOOPER_STATE_NEED_RETURN;
 	mutex_unlock(&binder_lock);
 	wait_event_interruptible(binder_user_error_wait, binder_stop_on_user_error < 2);

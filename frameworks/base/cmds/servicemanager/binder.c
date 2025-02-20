@@ -91,6 +91,11 @@ struct binder_state
     unsigned mapsize;
 };
 
+// binder_open 用来打开设备文件 /dev/binder，并且将它映射到进程的地址空间;
+// binder_open 打开设备文件 /dev/binder 之后，就会将得到的文件描述符保存在一个 binder_state 结构体的成员变量 fd 中，
+// 以便后面可以通过它来和 Binder 驱动程序交互;
+// 同时将 设备文件 /dev/binder 映射到自己的进程地址空间，并且将映射后得到的地址空间大小和起始地址
+// 保存在一个 binder_state 结构体的成员变量 mapsize 和 mapped 中。
 struct binder_state *binder_open(unsigned mapsize)
 {
     struct binder_state *bs;
@@ -101,6 +106,9 @@ struct binder_state *binder_open(unsigned mapsize)
         return 0;
     }
 
+    // 调用 open 打开设备文件 /dev/binder;
+    // Binder 驱动程序中的函数 binder_open 就会调用，它会为当前进程创建一个 binder_proc 结构体，
+    // 用来描述当前进程的Binder进程间通信状态;
     bs->fd = open("/dev/binder", O_RDWR);
     if (bs->fd < 0) {
         fprintf(stderr,"binder: cannot open device (%s)\n",
@@ -109,6 +117,7 @@ struct binder_state *binder_open(unsigned mapsize)
     }
 
     bs->mapsize = mapsize;
+    // 函数 mmap 将设备文件 /dev/binder 映射到进程的地址空间;
     bs->mapped = mmap(NULL, mapsize, PROT_READ, MAP_PRIVATE, bs->fd, 0);
     if (bs->mapped == MAP_FAILED) {
         fprintf(stderr,"binder: cannot map device (%s)\n",
@@ -134,21 +143,29 @@ void binder_close(struct binder_state *bs)
     free(bs);
 }
 
+// 注册Binder进程间通信机制的上下文管理者;
 int binder_become_context_manager(struct binder_state *bs)
 {
+    // Binder驱动程序是在它的函数 binder_ioctl 中处理IO控制命令 BINDER_SET_CONTEXT_MGR 的;
     return ioctl(bs->fd, BINDER_SET_CONTEXT_MGR, 0);
 }
 
 int binder_write(struct binder_state *bs, void *data, unsigned len)
 {
+    // 定义一个 binder_write_read 结构体 bwr;
     struct binder_write_read bwr;
     int res;
     bwr.write_size = len;
     bwr.write_consumed = 0;
+    // 将 data 所指向的一块缓冲区作为它的输入缓冲区;
     bwr.write_buffer = (unsigned) data;
+    // 将输出缓冲区设置为空，这样，当前线程将自己注册到 Binder 驱动程序中之后，就会马上返回到用户空间，
+    // 而不会在 Binder 驱动程序中等待 Client 进程的通信请求。
     bwr.read_size = 0;
     bwr.read_consumed = 0;
     bwr.read_buffer = 0;
+    // 调用 ioct 将当前线程注册到 Binder 驱动程序中;
+    // IO 控制命令 BINDER_WRITE_READ 是由 Binder 驱动程序中的函数 binder_ioctl 负责处理的;
     res = ioctl(bs->fd, BINDER_WRITE_READ, &bwr);
     if (res < 0) {
         fprintf(stderr,"binder_write: ioctl failed (%s)\n",
@@ -354,6 +371,10 @@ fail:
     return -1;
 }
 
+/* 函数 binder_loop 通过构造一个无限循环来等待和处理 Service 组件和 Client 组件的进程间通信请求;
+ * bs : 指向之前在 binder_open 中创建的一个 binder_state 结构体;
+ * func : 指向 Service Manager 中的函数 svcmgr_handle，用来处理 Service 组件和 Client 组件的进程间通信请求;
+ */
 void binder_loop(struct binder_state *bs, binder_handler func)
 {
     int res;
@@ -364,7 +385,9 @@ void binder_loop(struct binder_state *bs, binder_handler func)
     bwr.write_consumed = 0;
     bwr.write_buffer = 0;
     
+    // 使用 BC_ENTER_LOOPER 协议将自己注册到 Binder 驱动程序中;
     readbuf[0] = BC_ENTER_LOOPER;
+    // 调用 binder_write 将它发送到 Binder 驱动程序中;
     binder_write(bs, readbuf, sizeof(unsigned));
 
     for (;;) {
@@ -372,6 +395,10 @@ void binder_loop(struct binder_state *bs, binder_handler func)
         bwr.read_consumed = 0;
         bwr.read_buffer = (unsigned) readbuf;
 
+        // 循环使用 IO 控制命令 BINDER_WRITE_READ 来检查 Binder 驱动程序是否有新的进程间通信请求需要它来处理;
+        //      BINDER_WRITE_READ => binder_ioct->binder_thread_read 检查 Service Manager 进程是否有新的进程间通信请求需要处理;
+        // 如果有，就将它们交给函数 binder_parse 来处理;
+        // 否则，当前线程就会在 Binder 驱动程序中睡眠等待，直到有新的进程间通信请求到来为止;
         res = ioctl(bs->fd, BINDER_WRITE_READ, &bwr);
 
         if (res < 0) {
