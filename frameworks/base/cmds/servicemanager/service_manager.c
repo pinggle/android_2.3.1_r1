@@ -186,6 +186,14 @@ int do_add_service(struct binder_state *bs,
     return 0;
 }
 
+/**
+ * svcmgr_handler 用来处理 Client 进程的通信请求;
+ * 支持如下代码请求:
+ *  SVC_MGR_GET_SERVICE
+ *  SVC_MGR_CHECK_SERVICE
+ *  SVC_MGR_ADD_SERVICE
+ *  SVC_MGR_LIST_SERVICES
+ */
 int svcmgr_handler(struct binder_state *bs,
                    struct binder_txn *txn,
                    struct binder_io *msg,
@@ -259,12 +267,13 @@ int main(int argc, char **argv)
     struct binder_state *bs;
     // Service Manager 是一个特殊的 Service 组件，它的特殊之处就在于与它对应的Binder本地对象是一个虚拟的对象。
     // 这个虚拟的 Binder 本地对象的地址值等于0，并且在 Binder 驱动程序中引用了它的 Binder 引用对象的句柄值也等于0;
+    // 将变量 svcmgr 的值设置为 BINDER_SERVICE_MANAGER;
     void *svcmgr = BINDER_SERVICE_MANAGER;
 
-    // 调用 binder_open 打开设备文件 /dev/binder，以及将它映射到本进程的地址空间;
+    // 第一步: 调用 binder_open 打开设备文件 /dev/binder，以及将它映射到本进程的地址空间;
     bs = binder_open(128*1024);
 
-    // 调用 binder_become_context_manager 将自己注册为 Binder 进程间通信机制的上下文管理者;
+    // 第二步: 调用 binder_become_context_manager 将自己注册为 Binder 进程间通信机制的上下文管理者;
     if (binder_become_context_manager(bs)) {
         LOGE("cannot become context manager (%s)\n", strerror(errno));
         return -1;
@@ -272,7 +281,7 @@ int main(int argc, char **argv)
 
     // svcmgr_handle 用来描述一个与 Service Manager 对应的 Binder 本地对象;
     svcmgr_handle = svcmgr;
-    // 调用 binder_loop 来循环等待和处理 Client 进程的通信请求;
+    // 第三步: 调用 binder_loop 来循环等待和处理 Client 进程的通信请求;
     binder_loop(bs, svcmgr_handler);
     return 0;
 }

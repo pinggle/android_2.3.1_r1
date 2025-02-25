@@ -8,6 +8,8 @@
         "unordered_set": "c",
         "fstream": "c",
         "locale": "c",
-        "memory": "c"
+        "memory": "c",
+        "stdlib.h": "c",
+        "binder.h": "c"
     }
 }

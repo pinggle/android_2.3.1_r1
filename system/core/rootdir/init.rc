@@ -303,9 +303,14 @@ on property:persist.service.adb.enable=1
 on property:persist.service.adb.enable=0
     stop adbd
 
+# 关键字 service 表明 Service Manager 是以服务的形式启动的，它对应的程序文件和进程名称分别为: /system/bin/servicemanager 和 servicemanager;
 service servicemanager /system/bin/servicemanager
+    # 关键字 user 表明 Service Manager 是以系统用户 system 的身份运行的;
     user system
+    # 关键字 critical 表明 Service Manager 是系统中的一个关键服务;
+    # 在系统运行中，关键服务是不可以退出的，一旦退出，就会被系统重启;
     critical
+    # 关键字 onrestart 表示一旦 Service Manager 被系统重启，也需要将 zygote 和 media 两个进程重启;
     onrestart restart zygote
     onrestart restart media
 

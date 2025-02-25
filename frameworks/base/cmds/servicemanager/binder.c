@@ -84,18 +84,28 @@ const char *cmd_name(uint32_t cmd)
 #define BIO_F_IOERROR   0x04
 #define BIO_F_MALLOCED  0x08  /* needs to be free()'d */
 
+/**
+ * Service Manager 打开了设备文件 /dev/binder 之后，就会将得到的文件描述符
+ * 保存在一个 binder_state 结构体的成员变量 fd 中，以便后面可以通过它来和 Binder 驱动程序交互。
+ * Service Manager 将设备文件 /dev/binder 映射到自己的进程地址空间，并且将映射后得到的地址空间大小
+ * 和起始地址保存在一个 binder_state 结构体的成员变量 mapsize 和 mapped 中;
+ */ 
 struct binder_state
 {
-    int fd;
-    void *mapped;
-    unsigned mapsize;
+    int fd; // 打开设备文件 /dev/binder 之后的文件描述符;
+    void *mapped;   // 设备文件 /dev/binder 映射到自己进程空间后的起始地址;
+    unsigned mapsize;   // 设备文件 /dev/binder 映射到自己进程空间后的地址空间大小;
 };
 
-// binder_open 用来打开设备文件 /dev/binder，并且将它映射到进程的地址空间;
-// binder_open 打开设备文件 /dev/binder 之后，就会将得到的文件描述符保存在一个 binder_state 结构体的成员变量 fd 中，
-// 以便后面可以通过它来和 Binder 驱动程序交互;
-// 同时将 设备文件 /dev/binder 映射到自己的进程地址空间，并且将映射后得到的地址空间大小和起始地址
-// 保存在一个 binder_state 结构体的成员变量 mapsize 和 mapped 中。
+/**
+ * binder_open 用来打开设备文件 /dev/binder，并且将它映射到进程的地址空间;
+ * binder_open 打开设备文件 /dev/binder 之后，就会将得到的文件描述符保存在一个 binder_state 结构体的成员变量 fd 中;
+ * 以便后面可以通过它来和 Binder 驱动程序交互;
+ * 同时将 设备文件 /dev/binder 映射到自己的进程地址空间，并且将映射后得到的地址空间大小和起始地址
+ * 保存在一个 binder_state 结构体的成员变量 mapsize 和 mapped 中。
+ * 
+ * @mapsize : 参数mapsize的大小为 128*1024，即128K。
+ */
 struct binder_state *binder_open(unsigned mapsize)
 {
     struct binder_state *bs;
@@ -117,7 +127,8 @@ struct binder_state *binder_open(unsigned mapsize)
     }
 
     bs->mapsize = mapsize;
-    // 函数 mmap 将设备文件 /dev/binder 映射到进程的地址空间;
+    // 函数 mmap 将设备文件 /dev/binder 映射到进程的地址空间，它请求映射的地址空间大小为 mapsize，
+    // 即
     bs->mapped = mmap(NULL, mapsize, PROT_READ, MAP_PRIVATE, bs->fd, 0);
     if (bs->mapped == MAP_FAILED) {
         fprintf(stderr,"binder: cannot map device (%s)\n",
