@@ -2862,14 +2862,22 @@ static struct vm_operations_struct binder_vm_ops = {
 	.close = binder_vma_close,
 };
 
+/**
+ * 当进程调用 mmap 将设备文件 /dev/binder 映射到自己的地址空间时，
+ * Binder驱动程序中的函数 binder_mmap 就会被调用。
+ */
 static int binder_mmap(struct file *filp, struct vm_area_struct *vma)
 {
 	int ret;
+	// vm_area_struct 和 vm_struct 都是用来描述虚拟地址空间;
 	struct vm_struct *area;
+	// filp->private_data 保存的是在 binder_open 函数中创建的 binder_proc;
 	struct binder_proc *proc = filp->private_data;
 	const char *failure_string;
 	struct binder_buffer *buffer;
 
+	// vma的成员变量vm_start和vm_end指定了要映射的用户地址空间范围;
+	// binder驱动程序最多可以为进程分配4M内核缓冲区来传输进程间通信数据;
 	if ((vma->vm_end - vma->vm_start) > SZ_4M)
 		vma->vm_end = vma->vm_start + SZ_4M;
 
@@ -2959,19 +2967,30 @@ static int binder_open(struct inode *nodp, struct file *filp)
 	if (binder_debug_mask & BINDER_DEBUG_OPEN_CLOSE)
 		printk(KERN_INFO "binder_open: %d:%d\n", current->group_leader->pid, current->pid);
 
+	// 为进程创建一个 binder_proc 结构体 proc;
 	proc = kzalloc(sizeof(*proc), GFP_KERNEL);
 	if (proc == NULL)
 		return -ENOMEM;
+	// 对该 binder_proc 结构体 proc 进行初始化;
 	get_task_struct(current);
+	// tsk 用进程的任务控制块 current 初始化;
 	proc->tsk = current;
 	INIT_LIST_HEAD(&proc->todo);
 	init_waitqueue_head(&proc->wait);
+	// default_priority 用进程优先级 task_nice(current) 初始化;
 	proc->default_priority = task_nice(current);
 	mutex_lock(&binder_lock);
 	binder_stats.obj_created[BINDER_STAT_PROC]++;
+	// 将 binder_proc 结构体 proc 加入到一个全局 hash 队列 binder_procs 中;
+	// Binder 驱动程序将所有打开了设备文件 /dev/binder 的进程都加入到全局 hash 队列 binder_procs 中;
+	// 因此遍历这个hash队列就可以知道系统当前有多少个进程在使用 Binder 进程间通信机制;
 	hlist_add_head(&proc->proc_node, &binder_procs);
+	// pid 用进程组ID来初始化;
 	proc->pid = current->group_leader->pid;
 	INIT_LIST_HEAD(&proc->delivered_death);
+	// 将初始化完成之后的 binder_proc 结构体 proc 保存在参数 filp 的成员变量 private_data 中。
+	// 参数 filp 指向一个打开文件结构体，当进程调用函数 open 打开设备文件 /dev/binder 之后，内核就会返回一个文件描述符给进程,
+	// 
 	filp->private_data = proc;
 	mutex_unlock(&binder_lock);
 
@@ -2979,6 +2998,8 @@ static int binder_open(struct inode *nodp, struct file *filp)
 		char strbuf[11];
 		snprintf(strbuf, sizeof(strbuf), "%u", proc->pid);
 		remove_proc_entry(strbuf, binder_proc_dir_entry_proc);
+		// 在目标设备上的 /proc/binder/proc 目录下创建一个以进程ID为名称的只读文件，并且以函数 binder_read_proc_proc 作为它的文件内容读取函数。
+		// 通过读取文件 /proc/binder/proc/<PID> 的内容，我们就可以获得进程<PID>的Binder线程池、Binder实体对象、Binder引用对象以及内核缓冲区等信息;
 		create_proc_read_entry(strbuf, S_IRUGO, binder_proc_dir_entry_proc, binder_read_proc_proc, proc);
 	}
 
@@ -3757,11 +3778,20 @@ static int __init binder_init(void)
 {
 	int ret;
 
+	// 在目标设备上创建了一个 /proc/binder/proc 目录，每一个使用了 Binder 进程间通信机制的进程在该目录下都对应有一个文件,
+	// 这些文件是以进程ID来命名的,通过它们就可以读取到各个进程的Binder线程池、Binder实体对象、Binder引用对象以及内核缓冲区等信息.
 	binder_proc_dir_entry_root = proc_mkdir("binder", NULL);
 	if (binder_proc_dir_entry_root)
 		binder_proc_dir_entry_proc = proc_mkdir("proc", binder_proc_dir_entry_root);
+	// misc_register 来创建一个 Binder 设备;
+	// Binder 驱动程序在目标设备上创建了一个 Binder 设备文件 /dev/binder，这个设备文件的操作方法列表是由全局变量 binder_fops 指定的;
+	// 全局变量 binder_fops 为 Binder 设备文件 /dev/binder 指定文件打开、内存映射和IO控制函数分别为 binder_open,
+	// binder_mmap 和 Binder_ioctl;
 	ret = misc_register(&binder_miscdev);
 	if (binder_proc_dir_entry_root) {
+		// 在 /proc/binder 目录下创建了五个文件: state,stats,transactions,transaction_log,failed_transaction_log;
+		// 通过读取这五个文件就可以读取Binder驱动程序的运行状况;
+		// 例如,各个命令协议和返回协议的请求次数、日志记录信息，以及正在执行进程间通信过程的进程信息等。
 		create_proc_read_entry("state", S_IRUGO, binder_proc_dir_entry_root, binder_read_proc_state, NULL);
 		create_proc_read_entry("stats", S_IRUGO, binder_proc_dir_entry_root, binder_read_proc_stats, NULL);
 		create_proc_read_entry("transactions", S_IRUGO, binder_proc_dir_entry_root, binder_read_proc_transactions, NULL);

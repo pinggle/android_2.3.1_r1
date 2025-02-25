@@ -38,6 +38,7 @@ sp<IServiceManager> defaultServiceManager()
     {
         AutoMutex _l(gDefaultServiceManagerLock);
         if (gDefaultServiceManager == NULL) {
+            // 创建一个 Service Manager 代理对象;
             gDefaultServiceManager = interface_cast<IServiceManager>(
                 ProcessState::self()->getContextObject(NULL));
         }

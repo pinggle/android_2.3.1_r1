@@ -73,11 +73,13 @@ protected:
     const bool mIsMain;
 };
 
+// 获得进程内的一个 ProcessState 对象;
 sp<ProcessState> ProcessState::self()
 {
     if (gProcess != NULL) return gProcess;
     
     AutoMutex _l(gProcessMutex);
+    // 创建一个 ProcessState 对象;
     if (gProcess == NULL) gProcess = new ProcessState;
     return gProcess;
 }
@@ -95,7 +97,9 @@ void ProcessState::setContextObject(const sp<IBinder>& object)
 
 sp<IBinder> ProcessState::getContextObject(const sp<IBinder>& caller)
 {
+    // supportsProcess 来检查系统是否支持 Binder 进程间通信机制,即检查进程是否成功地打开了设备文件 /dev/binder;
     if (supportsProcesses()) {
+        // 调用 getStrongProxyForHandle 来创建一个 Binder 代理对象;
         return getStrongProxyForHandle(0);
     } else {
         return getContextObject(String16("default"), caller);
@@ -205,6 +209,9 @@ ProcessState::handle_entry* ProcessState::lookupHandleLocked(int32_t handle)
     return &mHandleToObject.editItemAt(handle);
 }
 
+/**
+ * getStrongProxyForHandle : 创建一个 Binder 代理对象;
+ */
 sp<IBinder> ProcessState::getStrongProxyForHandle(int32_t handle)
 {
     sp<IBinder> result;
@@ -331,6 +338,7 @@ static int open_driver()
         fcntl(fd, F_SETFD, FD_CLOEXEC);
         int vers;
 #if defined(HAVE_ANDROID_OS)
+        // 使用 IO 控制命令 BINDER_VERSION 来获得 Binder 驱动程序的版本号;
         status_t result = ioctl(fd, BINDER_VERSION, &vers);
 #else
         status_t result = -1;
@@ -348,6 +356,8 @@ static int open_driver()
         }
 #if defined(HAVE_ANDROID_OS)
         size_t maxThreads = 15;
+        // 使用 IO 控制命令 BINDER_SET_MAX_THREADS 来通知 Binder 驱动程序，
+        // 它最多可以请求进程创建 15 个 Binder 现成来处理进程间通信请求;
         result = ioctl(fd, BINDER_SET_MAX_THREADS, &maxThreads);
         if (result == -1) {
             LOGE("Binder ioctl to set max threads failed: %s", strerror(errno));
@@ -360,6 +370,7 @@ static int open_driver()
     return fd;
 }
 
+// 进程中的 ProcessState 对象的创建过程;
 ProcessState::ProcessState()
     : mDriverFD(open_driver())
     , mVMStart(MAP_FAILED)

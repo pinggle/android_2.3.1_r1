@@ -3,6 +3,11 @@
         "sched.h": "c",
         "mutex.h": "c",
         "fs.h": "c",
-        "module.h": "c"
+        "module.h": "c",
+        "unordered_map": "c",
+        "unordered_set": "c",
+        "fstream": "c",
+        "locale": "c",
+        "memory": "c"
     }
 }
