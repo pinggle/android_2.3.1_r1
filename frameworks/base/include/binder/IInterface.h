@@ -38,6 +38,9 @@ protected:
 
 // ----------------------------------------------------------------------
 
+// 模板参数 INTERFACE 指向 IServiceManager 接口，
+// 因此，它实际上是调用 IServiceManager 接口的成员函数 asInterface，
+// 将一个句柄值为 0 的 Binder 代理对象封装为一个 Service Manager 代理对象;
 template<typename INTERFACE>
 inline sp<INTERFACE> interface_cast(const sp<IBinder>& obj)
 {

@@ -76,6 +76,7 @@ protected:
 // 获得进程内的一个 ProcessState 对象;
 sp<ProcessState> ProcessState::self()
 {
+    // 如果 gProcess 不为 NULL，说明Binder库已经为进程创建过一个 ProcessState 了.
     if (gProcess != NULL) return gProcess;
     
     AutoMutex _l(gProcessMutex);
@@ -95,6 +96,9 @@ void ProcessState::setContextObject(const sp<IBinder>& object)
     setContextObject(object, String16("default"));
 }
 
+/**
+ * getContextObject 用来创建一个 Binder 代理对象;
+ */
 sp<IBinder> ProcessState::getContextObject(const sp<IBinder>& caller)
 {
     // supportsProcess 来检查系统是否支持 Binder 进程间通信机制,即检查进程是否成功地打开了设备文件 /dev/binder;
@@ -198,7 +202,9 @@ bool ProcessState::becomeContextManager(context_check_func checkFunc, void* user
 
 ProcessState::handle_entry* ProcessState::lookupHandleLocked(int32_t handle)
 {
+    // 一个 Binder 代理对象的句柄值同时也是它在列表 mHandleToObject 中的索引值;
     const size_t N=mHandleToObject.size();
+    // 句柄值 handle 如果大于或者等于 mHandleToObject 的大小，说明不存在该句柄值对应的 handle_entry 结构体;
     if (N <= (size_t)handle) {
         handle_entry e;
         e.binder = NULL;
@@ -218,6 +224,7 @@ sp<IBinder> ProcessState::getStrongProxyForHandle(int32_t handle)
 
     AutoMutex _l(mLock);
 
+    // 调用 lookupHandleLocked 来检查成员变量 mHandleToObject 中是否已经存在一个与句柄值 handle 对应的 handle_entry 结构体;
     handle_entry* e = lookupHandleLocked(handle);
 
     if (e != NULL) {
@@ -225,6 +232,9 @@ sp<IBinder> ProcessState::getStrongProxyForHandle(int32_t handle)
         // are unable to acquire a weak reference on this current one.  See comment
         // in getWeakProxyForHandle() for more info about this.
         IBinder* b = e->binder;
+        // handle_entry 结构体 e 的成员变量 binder 的值如果为 NULL，说明尚未为句柄值 handle 创建过 Binder 代理对象;
+        // 如果已经存在 Binder 代理对象，则尝试调用 attemptIncWeak 增加弱引用计数;
+        // 由于 Binder 代理对象(即 BpBinder 对象)的生命周期是受弱引用计数控制的，如果不能成功增加它的弱引用计数，那么就说明它已经被销毁了。
         if (b == NULL || !e->refs->attemptIncWeak(this)) {
             b = new BpBinder(handle); 
             e->binder = b;
@@ -235,6 +245,7 @@ sp<IBinder> ProcessState::getStrongProxyForHandle(int32_t handle)
             // reference to the remote proxy when this team doesn't have one
             // but another team is sending the handle to us.
             result.force_set(b);
+            // 这里要调用 decWeak 减少它的弱引用计数，因为之前的 if 语句，调用了 attemptIncWeak 增加了它的弱引用计数;
             e->refs->decWeak(this);
         }
     }
@@ -333,6 +344,7 @@ static int open_driver()
         return -1;
     }
 
+    // 调用函数 open 打开设备文件 /dev/binder;
     int fd = open("/dev/binder", O_RDWR);
     if (fd >= 0) {
         fcntl(fd, F_SETFD, FD_CLOEXEC);
@@ -357,7 +369,7 @@ static int open_driver()
 #if defined(HAVE_ANDROID_OS)
         size_t maxThreads = 15;
         // 使用 IO 控制命令 BINDER_SET_MAX_THREADS 来通知 Binder 驱动程序，
-        // 它最多可以请求进程创建 15 个 Binder 现成来处理进程间通信请求;
+        // 它最多可以请求进程创建 15 个 Binder 线程来处理进程间通信请求;
         result = ioctl(fd, BINDER_SET_MAX_THREADS, &maxThreads);
         if (result == -1) {
             LOGE("Binder ioctl to set max threads failed: %s", strerror(errno));
@@ -372,7 +384,7 @@ static int open_driver()
 
 // 进程中的 ProcessState 对象的创建过程;
 ProcessState::ProcessState()
-    : mDriverFD(open_driver())
+    : mDriverFD(open_driver()) // 调用 open_driver 打开设备文件 /dev/binder,并将得到的文件描述符保存在 mDriverFD 中;
     , mVMStart(MAP_FAILED)
     , mManagesContexts(false)
     , mBinderContextCheckFunc(NULL)
@@ -386,6 +398,10 @@ ProcessState::ProcessState()
         // availabla).
 #if !defined(HAVE_WIN32_IPC)
         // mmap the binder, providing a chunk of virtual address space to receive transactions.
+        // 调用 mmap 把设备文件 /dev/binder 映射到进程的地址空间，映射的地址空间大小为 BINDER_VM_SIZE;
+        // #define BINDER_VM_SIZE ((1*1024*1024) - (4096 *2))
+        // 将设备文件 /dev/binder 映射到进程的地址空间实际上是请求 Binder 驱动程序为进程分配内核缓冲区,
+        // 这个内核缓冲区的大小被 Binder 库默认设置为 1016KB.
         mVMStart = mmap(0, BINDER_VM_SIZE, PROT_READ, MAP_PRIVATE | MAP_NORESERVE, mDriverFD, 0);
         if (mVMStart == MAP_FAILED) {
             // *sigh*

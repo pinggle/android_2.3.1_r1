@@ -128,7 +128,9 @@ struct binder_state *binder_open(unsigned mapsize)
 
     bs->mapsize = mapsize;
     // 函数 mmap 将设备文件 /dev/binder 映射到进程的地址空间，它请求映射的地址空间大小为 mapsize，
-    // 即
+    // 即请求 Binder 驱动程序为进程分配 128K 大小的内核缓冲区。映射后得到的地址空间的起始地址和大小分别保存
+    // 在一个 binder_state 结构体 bs 的成员变量 mapped 和 mapsize 中。
+    // 最后，将 binder_state 结构体 bs 返回给调用者。
     bs->mapped = mmap(NULL, mapsize, PROT_READ, MAP_PRIVATE, bs->fd, 0);
     if (bs->mapped == MAP_FAILED) {
         fprintf(stderr,"binder: cannot map device (%s)\n",
@@ -383,8 +385,8 @@ fail:
 }
 
 /* 函数 binder_loop 通过构造一个无限循环来等待和处理 Service 组件和 Client 组件的进程间通信请求;
- * bs : 指向之前在 binder_open 中创建的一个 binder_state 结构体;
- * func : 指向 Service Manager 中的函数 svcmgr_handle，用来处理 Service 组件和 Client 组件的进程间通信请求;
+ * @bs : 指向之前在 binder_open 中创建的一个 binder_state 结构体，保存有 /dev/binder 的文件句柄和映射的用户空间地址和大小;
+ * @func : 指向 Service Manager 中的函数 svcmgr_handle，用来处理 Service 组件和 Client 组件的进程间通信请求;
  */
 void binder_loop(struct binder_state *bs, binder_handler func)
 {
@@ -417,6 +419,7 @@ void binder_loop(struct binder_state *bs, binder_handler func)
             break;
         }
 
+        // 如果有请求，就交给函数 binder_parse 来处理;
         res = binder_parse(bs, 0, readbuf, bwr.read_consumed, func);
         if (res == 0) {
             LOGE("binder_loop: unexpected reply?!\n");

@@ -33,12 +33,16 @@ namespace android {
 
 sp<IServiceManager> defaultServiceManager()
 {
+    // 如果 gDefaultServiceManager 不为 NULL，说明Binder库已经为进程创建过一个 Service Manage 代理对象了。
     if (gDefaultServiceManager != NULL) return gDefaultServiceManager;
     
     {
         AutoMutex _l(gDefaultServiceManagerLock);
         if (gDefaultServiceManager == NULL) {
             // 创建一个 Service Manager 代理对象;
+            // 1,调用 ProcessState 类的静态成员函数 self 获得进程内的一个 ProcessState 对象;
+            // 2,调用前面获得的 ProcessState 对象的成员函数 getContextObject 创建一个 Binder 代理对象;
+            // 3,调用模板函数 interface_cast<IServiceManager> 将前面获得的 Binder 代理对象封装成一个 Service Manager 代理对象;
             gDefaultServiceManager = interface_cast<IServiceManager>(
                 ProcessState::self()->getContextObject(NULL));
         }
@@ -155,8 +159,12 @@ public:
     virtual status_t addService(const String16& name, const sp<IBinder>& service)
     {
         Parcel data, reply;
+        // 将进程间通信数据写入到一个 Parcel对象 data 中;
+        // 调用 data.writeInterfaceToken 写入一个 Binder 进程间通信请求头;
         data.writeInterfaceToken(IServiceManager::getInterfaceDescriptor());
+        // 调用 data.writeString16 写入将要注册的Service组件的名称;
         data.writeString16(name);
+        // 调用 data.writeStrongBinder 将要注册的Service组件封装成一个flat_binder_object结构体;
         data.writeStrongBinder(service);
         status_t err = remote()->transact(ADD_SERVICE_TRANSACTION, data, &reply);
         return err == NO_ERROR ? reply.readExceptionCode() : err;

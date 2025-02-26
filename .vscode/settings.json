@@ -10,6 +10,7 @@
         "locale": "c",
         "memory": "c",
         "stdlib.h": "c",
-        "binder.h": "c"
+        "binder.h": "c",
+        "string": "cpp"
     }
 }

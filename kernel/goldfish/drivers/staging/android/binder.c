@@ -977,9 +977,9 @@ binder_get_node(struct binder_proc *proc, void __user *ptr)
 }
 
 /* 函数 binder_new_node 为 Service Manager 创建一个 Binder 实体对象;
- * 第一个参数 proc 用来描述 Service Manager 进程;
- * ptr : 用来指向 Binder 本地对象内部的一个弱引用计数对象的地址值;
- * cookie : 用来指向 Binder 本地对象的地址值;
+ * @proc : 用来描述 Service Manager 进程;
+ * @ptr : 用来指向 Binder 本地对象内部的一个弱引用计数对象的地址值;
+ * @cookie : 用来指向 Binder 本地对象的地址值;
  * 由于与 Service Manager 对象的Binder本地对象的地址值为0，因此 ptr 和 cookie 均被指定为 NULL; 
  */
 static struct binder_node *
@@ -2039,8 +2039,6 @@ binder_thread_write(struct binder_proc *proc, struct binder_thread *thread,
 			thread->looper |= BINDER_LOOPER_STATE_REGISTERED;
 			break;
 		case BC_ENTER_LOOPER:
-			// 将目标线程 thread 的状态设置为 BINDER_LOOPER_STATE_ENTERED，
-			// 以表明该线程是一个 Binder 线程，可以处理进程间通信请求;
 			if (binder_debug_mask & BINDER_DEBUG_THREADS)
 				printk(KERN_INFO "binder: %d:%d BC_ENTER_LOOPER\n",
 				       proc->pid, thread->pid);
@@ -2051,6 +2049,8 @@ binder_thread_write(struct binder_proc *proc, struct binder_thread *thread,
 					"BC_REGISTER_LOOPER\n",
 					proc->pid, thread->pid);
 			}
+			// 将目标线程 thread 的状态设置为 BINDER_LOOPER_STATE_ENTERED，
+			// 以表明该线程是一个 Binder 线程，可以处理进程间通信请求;
 			thread->looper |= BINDER_LOOPER_STATE_ENTERED;
 			break;
 		case BC_EXIT_LOOPER:
@@ -2683,6 +2683,9 @@ static unsigned int binder_poll(struct file *filp, struct poll_table_struct *wai
 	return 0;
 }
 
+/**
+ * 处理 IO 控制命令;
+ */
 static long binder_ioctl(struct file *filp, unsigned int cmd, unsigned long arg)
 {
 	int ret;

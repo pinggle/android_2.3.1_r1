@@ -70,7 +70,7 @@ private:
 
 int main(int argc, char** argv)
 {
-	// 调用 instantiate 函数将一个 FregService 组件注册到 Service Manager 中;
+	// 调用 instantiate 函数创建一个 FregService 组件，并将它注册到 Service Manager 中;
 	FregService::instantiate();
 
 	// 调用进程中的 ProcessState 对象的成员函数 startThreadPool 来启动一个 Binder 线程池;
