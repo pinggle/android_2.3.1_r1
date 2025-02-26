@@ -1346,6 +1346,11 @@ static void
 binder_transaction_buffer_release(struct binder_proc *proc,
 			struct binder_buffer *buffer, size_t *failed_at);
 
+/**
+ * binder_transaction: 处理进程发送给它的命令协议;
+ * @reply: 用来描述函数binder_transaction当前要处理的是一个BC_TRANSACTION命令协议，还是一个BC_REPLY命令协议;
+ * 	(0:表示处理的是BC_TRANSACTION命令协议;否则,就表示处理的是BC_REPLY命令协议)
+ */
 static void
 binder_transaction(struct binder_proc *proc, struct binder_thread *thread,
 	struct binder_transaction_data *tr, int reply)
@@ -1820,7 +1825,7 @@ binder_transaction_buffer_release(struct binder_proc *proc, struct binder_buffer
 }
 
 /* 函数 binder_thread_write 处理 BC_ENTER_LOOPER 协议;
- *
+ * @buffer: 指向进程传递给Binder驱动程序的一个binder_read_write结构体的输出缓冲区write_buffer;
  */
 int
 binder_thread_write(struct binder_proc *proc, struct binder_thread *thread,
@@ -2008,10 +2013,11 @@ binder_thread_write(struct binder_proc *proc, struct binder_thread *thread,
 		case BC_TRANSACTION:
 		case BC_REPLY: {
 			struct binder_transaction_data tr;
-
+			// 从用户空间读取传递的数据到 binder_transaction_data 结构体;
 			if (copy_from_user(&tr, ptr, sizeof(tr)))
 				return -EFAULT;
 			ptr += sizeof(tr);
+			// 调用函数binder_transaction来处理进程发送给它的命令协议(eg:BC_TRANSACTION);
 			binder_transaction(proc, thread, &tr, cmd == BC_REPLY);
 			break;
 		}

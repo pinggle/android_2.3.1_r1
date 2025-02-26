@@ -494,8 +494,10 @@ status_t IPCThreadState::transact(int32_t handle,
                                   uint32_t code, const Parcel& data,
                                   Parcel* reply, uint32_t flags)
 {
+    // 检查 parcel 对象data中的进程间通信数据是否正确;
     status_t err = data.errorCheck();
 
+    // 将参数 flags 的 TF_ACCEPT_FDS 位设置为1，表示允许Server进程在返回结果中携带文件描述符;
     flags |= TF_ACCEPT_FDS;
 
     IF_LOG_TRANSACTIONS() {
@@ -508,6 +510,7 @@ status_t IPCThreadState::transact(int32_t handle,
     if (err == NO_ERROR) {
         LOG_ONEWAY(">>>> SEND from pid %d uid %d %s", getpid(), getuid(),
             (flags & TF_ONE_WAY) == 0 ? "READ REPLY" : "ONE WAY");
+        // writeTransactionData 将Parcel内容写入到一个 binder_transaction_data 结构体中;
         err = writeTransactionData(BC_TRANSACTION, flags, handle, code, data, NULL);
     }
     
@@ -516,6 +519,9 @@ status_t IPCThreadState::transact(int32_t handle,
         return (mLastError = err);
     }
     
+    // 判断参数 flags 的 TF_ONE_WAY 是否为0，如果是，说明这是一个同步的进程间通信请求;
+    // 这时候如果用来保存通信结果的 Parcel 对象 reply 不等于 NULL，
+    // 那么就调用 waitForResponse 向 Binder 驱动程序发送一个 BC_TRANSACTION 命令协议;
     if ((flags & TF_ONE_WAY) == 0) {
         #if 0
         if (code == 4) { // relayout
@@ -525,6 +531,7 @@ status_t IPCThreadState::transact(int32_t handle,
         }
         #endif
         if (reply) {
+            // waitForResponse 向 Binder 驱动程序发送一个命令协议(eg: BC_TRANSACTION);
             err = waitForResponse(reply);
         } else {
             Parcel fakeReply;
@@ -647,12 +654,18 @@ status_t IPCThreadState::sendReply(const Parcel& reply, uint32_t flags)
     return waitForResponse(NULL, NULL);
 }
 
+/**
+ * waitForResponse 向 Binder 驱动程序发送一个命令协议(eg: BC_TRANSACTION);
+ */
 status_t IPCThreadState::waitForResponse(Parcel *reply, status_t *acquireResult)
 {
     int32_t cmd;
     int32_t err;
 
     while (1) {
+        // 通过一个while循环不断地调用成员函数talkWithDriver来与Binder驱动程序进行交互，
+        // 以便可以将前面准备好的BC_TRANSACTION命令协议发送给Binder驱动程序处理，
+        // 并等待Binder驱动程序将进程间通信结果返回来。
         if ((err=talkWithDriver()) < NO_ERROR) break;
         err = mIn.errorCheck();
         if (err < NO_ERROR) break;
@@ -738,6 +751,25 @@ finish:
     return err;
 }
 
+/**
+ * talkWithDriver是使用IO控制命令BINDER_WRITE_READ来与Binder驱动程序交互的，
+ * 因此，它需要定义一个binder_write_read结构体来指定输入缓冲区和输出缓冲区。
+ * 其中，输出缓冲区保存的是进程发送给Binder驱动程序的命令协议，
+ * 而输入缓冲区保存的是Binder驱动程序发送给进程的返回协议，
+ * 它们分别与IPCThreadState类内部的命令协议缓冲区mOut和返回协议缓冲区mIn对应。
+ * 
+ * 在IPCThreadState类内部，除了使用缓冲区 mOut 来保存即将要发送给Binder驱动程序的命令协议之外，
+ * 还使用缓冲区 mIn 来保存那些从Binder驱动程序接收到的返回协议。
+ * 
+ * @doReceive: 用来描述调用者是否希望IPCThreadState类的成员函数talkWithDriver只接收Binder驱动程序发送给该进程的返回协议;(默认为true)
+ * 一个进程使用IO控制命令BINDER_WRITE_READ进入到Binder驱动程序，当传递的binder_write_read结构体的输出缓冲区和输入缓冲区的长度分别等于0和大于0时，
+ * Binder驱动程序就不会处理进程给它发送的命令协议，而只会向该进程发送返回协议，这样进程就达到了只接收返回协议的效果。
+ * 
+ * IPCThreadState类的成员函数talkWithDriver是否只接收Binder驱动程序发送给它的返回协议还受到返回协议缓冲区mIn的影响。
+ * 如果上次Binder发送给进程的返回协议已经处理完成，即返回协议缓冲区mIn中的返回协议已经处理完成，
+ * 那么即使参数doReceive的值为true，IPCThreadState类的成员函数talkWithDriver也会向Binder驱动程序发送命令协议。
+ * 
+ */
 status_t IPCThreadState::talkWithDriver(bool doReceive)
 {
     LOG_ASSERT(mProcess->mDriverFD >= 0, "Binder driver is not opened");
@@ -750,9 +782,16 @@ status_t IPCThreadState::talkWithDriver(bool doReceive)
     // We don't want to write anything if we are still reading
     // from data left in the input buffer and the caller
     // has requested to read the next data.
+    // 如果返回协议缓冲区mIn的返回协议已经处理完成，即变量needRead的值为true，
+    // 或者调用者不是只希望接收Binder驱动程序发送给进程的返回协议，即参数doReceive的值为false，
+    // 那么将变量outAvail的值设置为IPCThreadState类内部的命令协议缓冲区的长度；否则，就将它的值设置为0。
+    // 如果变量outAvail的值等于0，那么将IPCThreadState类内部的命令协议缓冲区mOut设置
+    // 为binder_write_read结构体bwr的输出缓冲区write_buffer是起不到任何效果的。
     const size_t outAvail = (!doReceive || needRead) ? mOut.dataSize() : 0;
     
+    // 将变量outAvail的值设置为binder_write_read结构体bwr的输出缓冲区的长度write_size;
     bwr.write_size = outAvail;
+    // 将IPCThreadState类内部的命令协议缓冲区mOut设置为binder_write_read结构体bwr的输出缓冲区write_buffer;
     bwr.write_buffer = (long unsigned int)mOut.data();
 
     // This is what we'll read.
@@ -778,16 +817,25 @@ status_t IPCThreadState::talkWithDriver(bool doReceive)
     }
     
     // Return immediately if there is nothing to do.
+    // 判断binder_write_read结构体bwr的输出缓冲区的长度write_size和输入缓冲区的长度read_size的值是否都等于0。
+    // 如果是，就说明IPCThreadState类的成员函数talkWithDriver根本就不需要进入到Binder驱动程序，
+    // 因此，函数就直接返回了。
     if ((bwr.write_size == 0) && (bwr.read_size == 0)) return NO_ERROR;
     
     bwr.write_consumed = 0;
     bwr.read_consumed = 0;
     status_t err;
+
+    // while循环使用IO控制命令BINDER_WRITE_READ来与Binder驱动程序进行交互。
+    // 由于这时候传递给Binder驱动程序的binder_write_read结构体bwr的输出缓冲区的长度write_size和输入缓冲区的长度read_size均大于0，
+    // 因此，Binder驱动程序在处理IO控制命令BINDER_WRITE_READ时，就会首先调用函数binder_thread_write来处理进程给它发送的BC_TRANSACTION命令协议，
+    // 接着又会调用函数binder_thread_read来读取Binder驱动程序给进程发送的返回协议。
     do {
         IF_LOG_COMMANDS() {
             alog << "About to read/write, write size = " << mOut.dataSize() << endl;
         }
 #if defined(HAVE_ANDROID_OS)
+        // 调用 binder_ioctl 与驱动程序交互;
         if (ioctl(mProcess->mDriverFD, BINDER_WRITE_READ, &bwr) >= 0)
             err = NO_ERROR;
         else
@@ -806,6 +854,8 @@ status_t IPCThreadState::talkWithDriver(bool doReceive)
 			<< "), read consumed: " << bwr.read_consumed << endl;
     }
 
+    // 从Binder驱动程序中返回来之后，将Binder驱动程序已经处理的命令协议从IPCThreadState类内部的命令协议缓冲区mOut中移除，
+    // 接着将从Binder驱动程序中读取出来的返回协议保存在IPCThreadState类内部的返回协议缓冲区mIn中。
     if (err >= NO_ERROR) {
         if (bwr.write_consumed > 0) {
             if (bwr.write_consumed < (ssize_t)mOut.dataSize())
@@ -833,17 +883,24 @@ status_t IPCThreadState::talkWithDriver(bool doReceive)
     return err;
 }
 
+/**
+ * writeTransactionData 将Parcel内容写入到一个 binder_transaction_data 结构体中;
+ */
 status_t IPCThreadState::writeTransactionData(int32_t cmd, uint32_t binderFlags,
     int32_t handle, uint32_t code, const Parcel& data, status_t* statusBuffer)
 {
+    // 定义一个 binder_transaction_data 结构体;
     binder_transaction_data tr;
 
+    // 初始化 binder_transaction_data 结构体; (eg: 0, ADD_SERVICE_TRANSACTION, TF_ACCEPT_FDS)
     tr.target.handle = handle;
     tr.code = code;
     tr.flags = binderFlags;
     
+    // 确认Parcel对象data中的进程间通信数据的正确性;
     const status_t err = data.errorCheck();
     if (err == NO_ERROR) {
+        // 将Parcel对象data内部的数据缓冲区和偏移数组设置为 binder_transaction_data 结构体 tr 的数据缓冲区和偏移数组;
         tr.data_size = data.ipcDataSize();
         tr.data.ptr.buffer = data.ipcData();
         tr.offsets_size = data.ipcObjectsCount()*sizeof(size_t);
@@ -859,8 +916,11 @@ status_t IPCThreadState::writeTransactionData(int32_t cmd, uint32_t binderFlags,
         return (mLastError = err);
     }
     
+    // 将命令协议号cmd(eg:BC_TRANSACTION)写入到IPCThreadState类的成员变量mOut中;
     mOut.writeInt32(cmd);
+    // 将binder_transaction_data 结构体tr写入到IPCThreadState类的成员变量mOut中;
     mOut.write(&tr, sizeof(tr));
+    // 上面两行结合起来，表示它有一个cmd协议号的内容(tr)需要发送给Binder驱动程序处理;
     
     return NO_ERROR;
 }

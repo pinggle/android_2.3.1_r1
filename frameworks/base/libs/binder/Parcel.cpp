@@ -140,16 +140,24 @@ void release_object(const sp<ProcessState>& proc,
 inline static status_t finish_flatten_binder(
     const sp<IBinder>& binder, const flat_binder_object& flat, Parcel* out)
 {
+    // 调用Parcel对象out的成员函数writeObject将flat_binder_object结构体flat写入到内部;
     return out->writeObject(flat, false);
 }
 
+// 函数 flatten_binder 将一个Service组件封装成一个flat_binder_object结构体
 status_t flatten_binder(const sp<ProcessState>& proc,
     const sp<IBinder>& binder, Parcel* out)
 {
+    // 首先定义一个 flat_binder_object 结构体 obj;
     flat_binder_object obj;
     
+    // 设置标志位;
+    // 0x7f 用来描述将要注册的 Service 组件在处理一个进程间通信请求时，它所使用的 Service 线程的优先级不能低于 0x7f;
+    // FLAT_BINDER_FLAG_ACCEPTS_FDS 表示可以将包含文件描述符的进程间通信数据传递给将要注册的 Service 组件处理.
     obj.flags = 0x7f | FLAT_BINDER_FLAG_ACCEPTS_FDS;
     if (binder != NULL) {
+        // binder指向FregService组件，它继承了BBinder类，BBinder类的localBinder函数用来返回一个Binder本地对象接口;
+        // 由于 FregService 组件是一个 Binder本地对象，因此得到 local 变量不为 NULL;
         IBinder *local = binder->localBinder();
         if (!local) {
             BpBinder *proxy = binder->remoteBinder();
@@ -161,8 +169,11 @@ status_t flatten_binder(const sp<ProcessState>& proc,
             obj.handle = handle;
             obj.cookie = NULL;
         } else {
+            // 将 flat_binder_object 对象设置为 BINDER_TYPE_BINDER 类型的对象;
             obj.type = BINDER_TYPE_BINDER;
+            // 将 flat_binder_object 对象的binder值设置为local内部的一个弱引用计数对象的地址值;
             obj.binder = local->getWeakRefs();
+            // 将 flat_binder_object 对象的 cookie 对象设置为Binder本地对象local的地址值;
             obj.cookie = local;
         }
     } else {
@@ -171,6 +182,7 @@ status_t flatten_binder(const sp<ProcessState>& proc,
         obj.cookie = NULL;
     }
     
+    // 将 flat_binder_object 对象 obj 写入到 Parcel 对象 out 中;
     return finish_flatten_binder(binder, obj, out);
 }
 
@@ -443,12 +455,23 @@ bool Parcel::hasFileDescriptors() const
     return mHasFds;
 }
 
+/**
+ * 写入一个 Binder 进程间通信请求头;
+ * Binder进程间通信请求头由两部分内容组成，第一部分是一个整数值，用来描述一个 Strict Mode Policy;
+ * 第二部分内容是一个字符串，用来描述所请求服务的接口描述符。
+ */
 // Write RPC headers.  (previously just the interface token)
 status_t Parcel::writeInterfaceToken(const String16& interface)
 {
+    // 首先获得当前线程的 Strict Mode Policy，然后将它与宏 STRICT_MODE_PENALTY_GATHER 执行一个按位或操作，
+    // 最后将得到的结果写入到 Parcel 对象 data 中去传递给目标 Server 线程.
+    // STRICT_MODE_PENALTY_GATHER:表示Service线程在处理进程间通信请求时，即使违反了预先设定的 Strict Mode Policy，
+    // 系统也不发出警告，而是把这些警告收集起来，最后统一发送给Client线程来处理.
     writeInt32(IPCThreadState::self()->getStrictModePolicy() |
                STRICT_MODE_PENALTY_GATHER);
     // currently the interface identification token is just its name as a string
+    // 将一个服务接口描述符写入到 Parcel 对象data中。Server 组件在处理一个进程间通信请求时，会将这个服务接口的描述符读取出来，
+    // 并且验证它是否是一个合法的服务接口描述符，即是否是自己所实现的服务接口的描述符。如果不是，则说明这是一个非法的进程间通信请求。
     return writeString16(interface);
 }
 
@@ -648,6 +671,7 @@ status_t Parcel::writeString16(const char16_t* str, size_t len)
     return err;
 }
 
+// 将要注册的Service组件封装成一个flat_binder_object结构体;
 status_t Parcel::writeStrongBinder(const sp<IBinder>& val)
 {
     return flatten_binder(ProcessState::self(), val, this);
@@ -737,11 +761,25 @@ status_t Parcel::write(const Flattenable& val)
     return err;
 }
 
+/**
+ * writeOjbect: 将 flat_binder_object 结构体写入到内部;
+ * Parcel类内部有mData和mObjects两个缓冲区，
+ * 其中，mData是一个数据缓冲区，它里面的内容可能包含有整数、字符串或者Binder对象，即flat_binder_object结构体；
+ * mObjects是一个偏移数组，它保存了在数据缓冲区mData中的所有Binder对象的位置。
+ * Binder驱动程序就是通过这个偏移数组找到进程间通信数据中的Binder对象的，以便对它们进行特殊处理。
+ */
 status_t Parcel::writeObject(const flat_binder_object& val, bool nullMetaData)
 {
+    // Parcel类的成员变量mDataPos记录了数据缓冲区mData下一个用来写入数据的位置，
+    // 而成员变量mDataCapacity则记录了数据缓冲区mData的总大小；
+    // 判断数据缓冲区mData是否还有足够的空间来写入一个Binder对象。
     const bool enoughData = (mDataPos+sizeof(val)) <= mDataCapacity;
+    // Parcel类的成员变量mObjectsSize记录了偏移数组mObjects下一个用来写入数据的位置，
+    // 而成员变量mObjectsCapacity则记录了偏移数组mObjects的总大小;
+    // 下面一行代码用来判断偏移数组mObjects是否还有足够的空间来写入一个Binder对象的偏移位置。
     const bool enoughObjects = mObjectsSize < mObjectsCapacity;
     if (enoughData && enoughObjects) {
+        // 下面的代码是将参数val所描述的Binder对象写入到数据缓冲区mData和偏移数组mObjects中;
 restart_write:
         *reinterpret_cast<flat_binder_object*>(mData+mDataPos) = val;
         
@@ -753,13 +791,18 @@ restart_write:
         }
         
         // remember if it's a file descriptor
+        // 判断刚才写入的Binder对象的类型是否为 BINDER_TYPE_FD，如果是，
+        // 那么就说明该Parcel对象的数据缓冲区中包含有文件描述符,于是将成员变量mHasFds 和mFdsKnown的值设置为true;
         if (val.type == BINDER_TYPE_FD) {
             mHasFds = mFdsKnown = true;
         }
 
+        // 调用成员函数finishWrite来调整数据缓冲区mData下一个用来写入数据的位置，即调整成员变量mDataPos的值;
         return finishWrite(sizeof(flat_binder_object));
     }
 
+    // 如果数据缓冲区mData或者偏移数组mObjects的空间不足以用来写入一个Binder对象，
+    // 那么就会首先扩展它们的空间;
     if (!enoughData) {
         const status_t err = growData(sizeof(val));
         if (err != NO_ERROR) return err;

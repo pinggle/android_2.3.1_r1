@@ -156,17 +156,28 @@ status_t BpBinder::dump(int fd, const Vector<String16>& args)
     return err;
 }
 
+/**
+ * transact函数，用来向Binder驱动程序发送命令协议;
+ * @code: eg: ADD_SERVICE_TRANSACTION;
+ * @data: 包含要传递给Binder驱动程序的进程间通信数据;
+ * @reply: 输出参数,用来保存进程间通信结果;
+ * @flags: 用来描述这是一个同步还是异步的进程间通信请求,默认为0,即同步的进程间通信请求;
+ */
 status_t BpBinder::transact(
     uint32_t code, const Parcel& data, Parcel* reply, uint32_t flags)
 {
     // Once a binder has died, it will never come back to life.
+    // mAlive 用来描述该Binder代理对象所引用的Binder本地对象是否还活着(1:活着);
     if (mAlive) {
+        // 调用当前线程的IPCThreadState对象的成员函数transact向Binder驱动程序发送一个BC_TRANSACTION命令协议;
+        // mHandle 用来描述该Binder代理对象的句柄值;(如果代理对象是ServiceManager代理对象，那么它的mHandle值就为0)
         status_t status = IPCThreadState::self()->transact(
             mHandle, code, data, reply, flags);
         if (status == DEAD_OBJECT) mAlive = 0;
         return status;
     }
 
+    // 如果返回 DEAD_OBJECT，表示相应的Binder本地对象已经死亡了.
     return DEAD_OBJECT;
 }
 

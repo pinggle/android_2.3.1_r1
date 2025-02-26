@@ -166,6 +166,7 @@ public:
         data.writeString16(name);
         // 调用 data.writeStrongBinder 将要注册的Service组件封装成一个flat_binder_object结构体;
         data.writeStrongBinder(service);
+        // 调用内部的一个Binder代理对象的成员函数transact向Binder驱动程序发送一个BC_TRANSACTION命令协议;
         status_t err = remote()->transact(ADD_SERVICE_TRANSACTION, data, &reply);
         return err == NO_ERROR ? reply.readExceptionCode() : err;
     }
