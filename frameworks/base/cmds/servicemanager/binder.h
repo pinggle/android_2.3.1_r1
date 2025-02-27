@@ -9,6 +9,9 @@
 
 struct binder_state;
 
+/**
+ * binder_object: 用来描述进程间通信数据的一个 Binder 对象，它等同于(kernel_driver中的)结构体 flat_binder_object。
+ */
 struct binder_object
 {
     uint32_t type;
@@ -17,6 +20,9 @@ struct binder_object
     void *cookie;
 };
 
+/**
+ * binder_txn: 用来描述进程间通信数据，等同于(kernel_driver中的)结构体 binder_transaction_data。
+ */
 struct binder_txn
 {
     void *target;
@@ -33,21 +39,38 @@ struct binder_txn
     void *offs;
 };
 
+/**
+ * binder_io: 用来解析进程间通信数据的，它的作用类似于Binder库中的Parcel类。
+ */
 struct binder_io
 {
+    // 指向进程间通信数据中，当前正在解析的数据缓冲区;
     char *data;            /* pointer to read/write from */
+    // 指向进程间通信数据中，当前正在解析的偏移数组;
     uint32_t *offs;        /* array of offsets */
+    // 描述数据缓冲区data0还有多少内容是未被解析的;
     uint32_t data_avail;   /* bytes available in data buffer */
+    // 描述偏移数组offs0中还有多少内容是未被解析的;
     uint32_t offs_avail;   /* entries available in offsets array */
 
+    // 指向数据缓冲区;
     char *data0;           /* start of data buffer */
+    // 指向偏移数组的起始地址;
     uint32_t *offs0;       /* start of offsets buffer */
+    // flags用来描述数据缓冲区的属性;
     uint32_t flags;
+    // 保留给以后使用;
     uint32_t unused;
 };
 
+/**
+ * binder_death: 用来描述一个死亡接收通知;
+ */
 struct binder_death {
+    // func是一个函数指针，当与其宿主svcinfo结构体所对应的Service组件死亡时，
+    // 该函数指针所指向的函数就会被调用，以便可以获得相应的Service组件的死亡通知。
     void (*func)(struct binder_state *bs, void *ptr);
+    // ptr指向其宿主svcinfo结构体;
     void *ptr;
 };    
 

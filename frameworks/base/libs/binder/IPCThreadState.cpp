@@ -671,6 +671,8 @@ status_t IPCThreadState::waitForResponse(Parcel *reply, status_t *acquireResult)
         if (err < NO_ERROR) break;
         if (mIn.dataAvail() == 0) continue;
         
+        // IPCThreadState类的成员函数talkWithDriver已经将Binder驱动程序给进程发送的 BR_TRANSACTION_COMPLETE 返回协议
+        // 保存在内部的返回协议缓冲区mIn中，因此，下面就可以通过返回协议缓冲区mIn来获得这个 BR_TRANSACTION_COMPLETE 返回协议。
         cmd = mIn.readInt32();
         
         IF_LOG_COMMANDS() {
@@ -680,6 +682,14 @@ status_t IPCThreadState::waitForResponse(Parcel *reply, status_t *acquireResult)
 
         switch (cmd) {
         case BR_TRANSACTION_COMPLETE:
+            // IPCThreadState类的成员函数waitForResponse对BR_TRANSACTION_COMPLETE返回协议的处理很简单，
+            // 它跳出了switch语句之后，就重新执行外层的while循环，
+            // 即再次调用成员函数talkWithDriver来与Binder驱动程序交互。
+
+            // 再次进入到IPCThreadState类的成员函数talkWithDriver中时，
+            // 由于IPCThreadState类内部的命令协议缓冲区mOut中的命令协议，以及返回协议缓冲区mIn中的返回协议都已经处理完成了，
+            // 因此，当它再次通过IO控制命令BINDER_WRITE_READ进入到Binder驱动程序的函数binder_ioctl中时，
+            // 就会直接调用函数 binder_thread_read 等待目标进程将上次发出的进程间通信请求的结果返回来。
             if (!reply && !acquireResult) goto finish;
             break;
         

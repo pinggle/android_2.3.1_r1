@@ -957,6 +957,14 @@ static void binder_free_buf(
 	binder_insert_free_buffer(proc, buffer);
 }
 
+/**
+ * 函数binder_get_node: 根据一个用户空间地址ptr在目标进程proc中找到一个对应的Binder实体对象。
+ * 
+ * 一个进程中的所有Binder实体对象都以它们的成员变量ptr作为关键字保存在进程内部的一个红黑树nodes中。
+ * 因此，函数就在目标进程proc的Binder实体对象红黑树nodes中检查是否存在一个与参数ptr对应的Binder实体对象。
+ * 如果存在，就将对应的Binder对象返回给调用者；否则，就返回一个NULL值给调用者。
+ * 
+ */
 static struct binder_node *
 binder_get_node(struct binder_proc *proc, void __user *ptr)
 {
@@ -1122,6 +1130,9 @@ binder_get_ref(struct binder_proc *proc, uint32_t desc)
 	return NULL;
 }
 
+/**
+ * 函数binder_get_ref_for_node: 在目标进程target_proc中创建一个Binder引用对象来引用该Service组件;
+ */
 static struct binder_ref *
 binder_get_ref_for_node(struct binder_proc *proc, struct binder_node *node)
 {
@@ -1130,6 +1141,13 @@ binder_get_ref_for_node(struct binder_proc *proc, struct binder_node *node)
 	struct rb_node *parent = NULL;
 	struct binder_ref *ref, *new_ref;
 
+	// 首先判断是否已经在目标进程proc中为Binder实体对象node创建过一个Binder引用对象。
+	// 如果已经创建过，那么就会将对应的Binder引用对象返回给调用者；
+	// 否则，就会首先创建一个Binder引用对象来引用该Binder实体对象node，然后再将它返回给调用者。
+
+	// 一个进程中的所有Binder引用对象都以它们的成员变量node作为关键字保存在一个红黑树refs_by_node中。
+	// 因此，下面的while循环就在目标进程proc的红黑树refs_by_node中检查是否已经存在一个与Binder实体对象node
+	// 对应的Binder引用对象。如果存在，就直接将它返回给调用者；
 	while (*p) {
 		parent = *p;
 		ref = rb_entry(parent, struct binder_ref, rb_node_node);
@@ -1141,6 +1159,9 @@ binder_get_ref_for_node(struct binder_proc *proc, struct binder_node *node)
 		else
 			return ref;
 	}
+
+	// 如果不存在，接下来就会在目标进程proc中为Binder实体对象node创建一个Binder引用对象new_ref，
+	// 并且将它添加到目标进程proc的红黑树refs_by_node中。
 	new_ref = kzalloc(sizeof(*ref), GFP_KERNEL);
 	if (new_ref == NULL)
 		return NULL;
@@ -1151,7 +1172,11 @@ binder_get_ref_for_node(struct binder_proc *proc, struct binder_node *node)
 	rb_link_node(&new_ref->rb_node_node, parent, p);
 	rb_insert_color(&new_ref->rb_node_node, &proc->refs_by_node);
 
+	// 为新创建的Binder引用对象new_ref分配句柄值。
+	// 检查Binder实体对象node是否引用了Service Manager的Binder实体对象binder_context_mgr_node。
+	// 如果是，那么就将Binder引用对象new_ref的句柄值设置为0；否则，就先将Binder引用对象new_ref的句柄值设置为1.
 	new_ref->desc = (node == binder_context_mgr_node) ? 0 : 1;
+	// for循环实际上是在目标进程proc中找到一个【未使用的最小的句柄值】来作为新创建的Binder引用对象new_ref的句柄值。
 	for (n = rb_first(&proc->refs_by_desc); n != NULL; n = rb_next(n)) {
 		ref = rb_entry(n, struct binder_ref, rb_node_desc);
 		if (ref->desc > new_ref->desc)
@@ -1160,6 +1185,7 @@ binder_get_ref_for_node(struct binder_proc *proc, struct binder_node *node)
 	}
 
 	p = &proc->refs_by_desc.rb_node;
+	// while循环再次确认前面为Binder引用对象new_ref分配的句柄值是有效的。
 	while (*p) {
 		parent = *p;
 		ref = rb_entry(parent, struct binder_ref, rb_node_desc);
@@ -1171,9 +1197,11 @@ binder_get_ref_for_node(struct binder_proc *proc, struct binder_node *node)
 		else
 			BUG();
 	}
+	// 将Binder引用对象new_ref添加到目标进程proc的红黑树refs_by_desc中。
 	rb_link_node(&new_ref->rb_node_desc, parent, p);
 	rb_insert_color(&new_ref->rb_node_desc, &proc->refs_by_desc);
 	if (node) {
+		// 将Binder引用对象new_ref添加到它所引用的Binder实体对象node的Binder引用对象列表中。
 		hlist_add_head(&new_ref->node_entry, &node->refs);
 		if (binder_debug_mask & BINDER_DEBUG_INTERNAL_REFS)
 			printk(KERN_INFO "binder: %d new ref %d desc %d for "
@@ -1350,6 +1378,13 @@ binder_transaction_buffer_release(struct binder_proc *proc,
  * binder_transaction: 处理进程发送给它的命令协议;
  * @reply: 用来描述函数binder_transaction当前要处理的是一个BC_TRANSACTION命令协议，还是一个BC_REPLY命令协议;
  * 	(0:表示处理的是BC_TRANSACTION命令协议;否则,就表示处理的是BC_REPLY命令协议)
+ * 
+ * 发出该BC_TRANSACTION命令协议的源进程和源线程分别是FregServer应用程序进程及其主线程，
+ * 它们分别使用binder_proc结构体proc和binder_thread结构体thread来描述。
+ * 源进程proc发送BC_TRANSACTION命令协议给Binder驱动程序的目的是要将一个Service组件FregService注册
+ * 到Service Manager中，因此，在binder_transaction_data结构体tr中，
+ * 它指向的目标Binder对象是一个Binder引用对象，并且它的句柄值等于0。
+ * 
  */
 static void
 binder_transaction(struct binder_proc *proc, struct binder_thread *thread,
@@ -1419,8 +1454,10 @@ binder_transaction(struct binder_proc *proc, struct binder_thread *thread,
 		}
 		target_proc = target_thread->proc;
 	} else {
+		// 由于目标Binder引用对象的句柄值等于0，即 tr->target.handle 的值为 false;
 		if (tr->target.handle) {
 			struct binder_ref *ref;
+			// 调用函数binder_get_ref来获得与句柄值tr-＞target.handle对应的Binder引用对象;
 			ref = binder_get_ref(proc, tr->target.handle);
 			if (ref == NULL) {
 				binder_user_error("binder: %d:%d got "
@@ -1429,8 +1466,11 @@ binder_transaction(struct binder_proc *proc, struct binder_thread *thread,
 				return_error = BR_FAILED_REPLY;
 				goto err_invalid_target_handle;
 			}
+			// 再通过这个Binder引用对象的成员变量node来找到目标Binder实体对象target_node;
 			target_node = ref->node;
 		} else {
+			// 将目标 Binder 实体对象 target_node 指向一个引用了 Service Manager 的 Binder 实体对象 binder_context_mgr_node;
+			// binder_context_mgr_node是Binder驱动程序在Service Manager启动时创建的;
 			target_node = binder_context_mgr_node;
 			if (target_node == NULL) {
 				return_error = BR_DEAD_REPLY;
@@ -1438,11 +1478,22 @@ binder_transaction(struct binder_proc *proc, struct binder_thread *thread,
 			}
 		}
 		e->to_node = target_node->debug_id;
+		// 找到了目标Binder实体对象之后，就可以根据它的成员变量proc来找到目标进程target_proc;
 		target_proc = target_node->proc;
 		if (target_proc == NULL) {
 			return_error = BR_DEAD_REPLY;
 			goto err_dead_binder;
 		}
+		// 从理论上说，找到了目标进程target_proc之后，Binder驱动程序就可以向它发送一个BR_TRANSACTION返回协议，
+		// 以便它可以处理注册Service组件FregService的进程间通信请求。
+		// 发送给目标进程target_proc的BR_TRANSACTION返回协议最终是由它的空闲Binder线程来处理的。
+		// 这些空闲的Binder线程可以划分为两种类型：第一种是因为无事可做而空闲；
+		// 第二种不是真的空闲，而是它在处理某个事务的过程中，需要等待其他线程来完成另外一个事务。
+		// 如果Binder驱动程序能够从目标进程target_proc中挑选出一个属于第二种类型的空闲Binder线程来处理 BR_TRANSACTION 返回协议，
+		// 并且又不会影响该线程处理它原来的事务，那么Binder驱动程序就可以充分地利用目标进程target_proc的空闲Binder线程来处理进程间通信请求了。
+		
+		// 下面的代码，尝试在目标进程target_proc中找到一个属于第二种类型的Binder空闲线程target_thread来处理一个BR_TRANSACTION返回协议，
+		// 以便可以提高目标进程target_proc的进程间通信并发处理能力。
 		if (!(tr->flags & TF_ONE_WAY) && thread->transaction_stack) {
 			struct binder_transaction *tmp;
 			tmp = thread->transaction_stack;
@@ -1464,6 +1515,10 @@ binder_transaction(struct binder_proc *proc, struct binder_thread *thread,
 			}
 		}
 	}
+
+	// 如果Binder驱动程序在目标进程target_proc中找到了一个最优的目标线程target_thread来接收BR_TRANSACTION返回协议;
+	// 就将变量target_list和target_wait分别指向该目标线程target_thread的todo队列和wait等待队列；
+	// 否则，就将变量target_list和target_wait分别指向该目标进程target_proc的todo队列和wait等待队列。
 	if (target_thread) {
 		e->to_thread = target_thread->pid;
 		target_list = &target_thread->todo;
@@ -1473,8 +1528,14 @@ binder_transaction(struct binder_proc *proc, struct binder_thread *thread,
 		target_wait = &target_proc->wait;
 	}
 	e->to_proc = target_proc->pid;
+	// 有了目标todo队列target_list和目标wait等待队列target_wait之后，
+	// 函数接下来就可以将一个与BR_TRANSACTION返回协议相关的待处理工作项加入到目标todo队列target_list中，
+	// 以及通过目标wait等待队列target_wait将目标进程或者目标线程唤醒来处理这个工作项。
 
 	/* TODO: reuse incoming transaction for reply */
+	// 分配一个 binder_transaction 结构体 t;
+	// 后面会将它封装为一个BINDER_WORK_TRANSACTION类型的工作项加入到目标todo队列target_list中，
+	// 以便目标线程可以接收到一个BR_TRANSACTION返回协议。
 	t = kzalloc(sizeof(*t), GFP_KERNEL);
 	if (t == NULL) {
 		return_error = BR_FAILED_REPLY;
@@ -1482,6 +1543,9 @@ binder_transaction(struct binder_proc *proc, struct binder_thread *thread,
 	}
 	binder_stats.obj_created[BINDER_STAT_TRANSACTION]++;
 
+	// 分配了一个binder_work结构体tcomplete，
+	// 后面会将它封装成一个BINDER_WORK_TRANSACTION_COMPLETE类型的工作项加入到源线程thread的todo队列中，
+	// 以便该线程知道可以马上返回用户空间，并且知道它之前给Binder驱动程序发送的BC_TRANSACTION命令协议已经被接收了。
 	tcomplete = kzalloc(sizeof(*tcomplete), GFP_KERNEL);
 	if (tcomplete == NULL) {
 		return_error = BR_FAILED_REPLY;
@@ -1489,6 +1553,7 @@ binder_transaction(struct binder_proc *proc, struct binder_thread *thread,
 	}
 	binder_stats.obj_created[BINDER_STAT_TRANSACTION_COMPLETE]++;
 
+	// 开始初始化前面分配的binder_transaction结构体t;
 	t->debug_id = ++binder_last_id;
 	e->debug_id = t->debug_id;
 
@@ -1510,6 +1575,10 @@ binder_transaction(struct binder_proc *proc, struct binder_thread *thread,
 	}
 
 	if (!reply && !(tr->flags & TF_ONE_WAY))
+		// 如果函数正在处理的是一个BC_TRANSACTION命令协议，并且它所描述的是一个同步的进程间通信请求，
+		// 那么下面就会将binder_transaction结构体t的成员变量from指向源线程thread，
+		// 以便目标进程target_proc或者目标线程target_thread处理完该进程间通信请求之后，
+		// 能够找回发出该进程间通信请求的线程，最终将进程间通信结果返回给它。
 		t->from = thread;
 	else
 		t->from = NULL;
@@ -1519,6 +1588,9 @@ binder_transaction(struct binder_proc *proc, struct binder_thread *thread,
 	t->code = tr->code;
 	t->flags = tr->flags;
 	t->priority = task_nice(current);
+	// 为binder_transaction结构体t分配一个内核缓冲区，以便可以将进程间通信数据复制到它里面，
+	// 最后传递给目标进程target_proc或者目标线程target_thread处理。
+	// 这个内核缓冲区是在目标进程target_proc中分配的。
 	t->buffer = binder_alloc_buf(target_proc, tr->data_size,
 		tr->offsets_size, !reply && (t->flags & TF_ONE_WAY));
 	if (t->buffer == NULL) {
@@ -1530,10 +1602,15 @@ binder_transaction(struct binder_proc *proc, struct binder_thread *thread,
 	t->buffer->transaction = t;
 	t->buffer->target_node = target_node;
 	if (target_node)
+		// 调用函数binder_inc_node来增加目标Binder实体对象的强引用计数，
+		// 因为binder_transaction结构体t通过成员变量target_node引用了它。
 		binder_inc_node(target_node, 1, 0, NULL);
 
+	// 计算分配给binder_transaction结构体t的内核缓冲区中用来保存偏移数组的开始位置offp;
 	offp = (size_t *)(t->buffer->data + ALIGN(tr->data_size, sizeof(void *)));
 
+	// 将binder_transaction_data结构体tr的数据缓冲区，
+	// 以及偏移数组的内容复制到分配给binder_transaction结构体t的内核缓冲区中。
 	if (copy_from_user(t->buffer->data, tr->data.ptr.buffer, tr->data_size)) {
 		binder_user_error("binder: %d:%d got transaction with invalid "
 			"data ptr\n", proc->pid, thread->pid);
@@ -1553,7 +1630,14 @@ binder_transaction(struct binder_proc *proc, struct binder_thread *thread,
 		return_error = BR_FAILED_REPLY;
 		goto err_bad_offset;
 	}
+
+	// 计算分配给binder_transaction结构体t的内核缓冲区中用来保存偏移数组的结束位置off_end;
 	off_end = (void *)offp + tr->offsets_size;
+
+	// 接下来，函数就根据这两个位置(offp和off_end)来遍历进程间通信数据中的Binder对象，以便可以对它们进行处理。
+	// for循环依次处理进程间通信数据中的Binder对象。如果Binder驱动程序是第一次碰到这些 Binder对象，
+	// 那么Binder驱动程序就会根据它们的类型分别创建一个Binder实体对象或者一个Binder引用对象；
+	// 否则，就会将之前为它们创建的Binder实体对象或者Binder引用对象获取回来，以便可以增加它们的引用计数，避免它们过早地被销毁。
 	for (; offp < off_end; offp++) {
 		struct flat_binder_object *fp;
 		if (*offp > t->buffer->data_size - sizeof(*fp) ||
@@ -1570,8 +1654,12 @@ binder_transaction(struct binder_proc *proc, struct binder_thread *thread,
 		case BINDER_TYPE_BINDER:
 		case BINDER_TYPE_WEAK_BINDER: {
 			struct binder_ref *ref;
+			// 调用函数binder_get_node就无法获得一个引用了它的Binder实体对象;
 			struct binder_node *node = binder_get_node(proc, fp->binder);
 			if (node == NULL) {
+				// 调用函数binder_new_node为它创建一个Binder实体对象node。
+				// 在创建Binder实体对象node时，会根据从用户空间传递进来的flat_binder_object结构体的内容
+				// 来设置它的最小线程优先级min_priority，以及是否接收文件描述符标志accept_fds。
 				node = binder_new_node(proc, fp->binder, fp->cookie);
 				if (node == NULL) {
 					return_error = BR_FAILED_REPLY;
@@ -1588,17 +1676,32 @@ binder_transaction(struct binder_proc *proc, struct binder_thread *thread,
 					fp->cookie, node->cookie);
 				goto err_binder_get_ref_for_node_failed;
 			}
+			// 接下来就要将即将要注册的Service组件FregService从源进程proc传递到目标进程target_proc中;
+			// 调用函数binder_get_ref_for_node在目标进程target_proc中创建一个Binder引用对象来引用该Service组件FregService。
 			ref = binder_get_ref_for_node(target_proc, node);
 			if (ref == NULL) {
 				return_error = BR_FAILED_REPLY;
 				goto err_binder_get_ref_for_node_failed;
 			}
+			// 将flat_binder_object结构体fp的类型修改为BINDER_TYPE_HANDLE，并且设置好它的句柄值。
+			// 这是因为当Binder驱动程序将进程间通信数据传递给目标进程target_proc时，
+			// 进程间通信数据中的Binder实体对象就变成了Binder引用对象，因此，就需要修改flat_binder_object结构体fp的类型。
 			if (fp->type == BINDER_TYPE_BINDER)
 				fp->type = BINDER_TYPE_HANDLE;
 			else
 				fp->type = BINDER_TYPE_WEAK_HANDLE;
 			fp->handle = ref->desc;
+
+			// 调用函数binder_inc_ref来增加它的引用计数。
+			// 在目标进程target_proc创建好一个Binder引用对象ref之后，接着就要将它传递给该目标进程了。
+			// 在传递的过程中，必须要保证Binder引用对象ref不会被销毁.
 			binder_inc_ref(ref, fp->type == BINDER_TYPE_HANDLE, &thread->todo);
+			// 前面在创建Binder引用对象ref时，尚未增加过与它所引用的Binder实体对象对应的Binder本地对象的引用计数，
+			// 因此，在调用函数binder_inc_ref来增加Binder引用对象ref的引用计数时，
+			// 需要将源线程thread的todo队列作为第三个参数传进去，以便Binder驱动程序可以将一个类型为BINDER_WORK_NODE的工作项添加到它里面。
+			// 这样，当源线程thread从Binder驱动程序返回到用户空间时，就可以增加相应的Binder本地对象，
+			// 即Service组件FregService的引用计数了。
+
 			if (binder_debug_mask & BINDER_DEBUG_TRANSACTION)
 				printk(KERN_INFO "        node %d u%p -> ref %d desc %d\n",
 				       node->debug_id, node->ptr, ref->debug_id, ref->desc);
@@ -1690,6 +1793,10 @@ binder_transaction(struct binder_proc *proc, struct binder_thread *thread,
 		BUG_ON(t->buffer->async_transaction != 0);
 		binder_pop_transaction(target_thread, in_reply_to);
 	} else if (!(t->flags & TF_ONE_WAY)) {
+		// 如果函数binder_transaction正在处理的是一个同步的进程间通信请求，
+		// 即binder_transaction结构体t的成员变量flags的TF_ONE_WAY位等于0，
+		// 那么下面就设置它的成员变量need_reply的值为1，表示它需要等待回复。
+		// 接着将事务t压入到源线程thread的事务堆栈transaction_stack中。
 		BUG_ON(t->buffer->async_transaction != 0);
 		t->need_reply = 1;
 		t->from_parent = thread->transaction_stack;
@@ -1698,17 +1805,33 @@ binder_transaction(struct binder_proc *proc, struct binder_thread *thread,
 		BUG_ON(target_node == NULL);
 		BUG_ON(t->buffer->async_transaction != 1);
 		if (target_node->has_async_transaction) {
+			// 如果函数binder_transaction正在处理的是一个异步的进程间通信请求，
+			// 即binder_transaction结构体t的成员变量flags的TF_ONE_WAY位等于1，
+			// 那么就会检查目标Binder实体对象target_node当前是否正在处理异步事务。
+			// 如果是，那么它的成员变量has_async_transaction的值就会等于1。
+			// 在这种情况下，Binder驱动程序就需要将binder_transaction结构体t封装成
+			// 一个工作项添加到目标Binder实体对象target_node的async_todo队列中去等待处理，
+			// 而不应该放到目标进程target_proc或者目标线程target_thread的todo队列中去等待处理。
+			// 因此，就需要修改目标todo队列target_list和目标wait等待队列target_wait的值。
 			target_list = &target_node->async_todo;
 			target_wait = NULL;
 		} else
 			target_node->has_async_transaction = 1;
 	}
+	// 将 binder_transaction 结构体t封装成一个类型为 BINDER_WORK_TRANSACTION 的工作项
+	// 添加到目标进程 target_proc 或者目标线程 target_thread的todo 队列中.
 	t->work.type = BINDER_WORK_TRANSACTION;
 	list_add_tail(&t->work.entry, target_list);
+	// 将 binder_work 结构体 tcomplete 封装成一个类型为 BINDER_WORK_TRANSACTION_COMPLETE 的工作项
+	// 添加到源线程 thread 的 todo 队列中，以便它从 Binder 驱动程序返回到用户空间之前，可以处理该工作项。
 	tcomplete->type = BINDER_WORK_TRANSACTION_COMPLETE;
 	list_add_tail(&tcomplete->entry, &thread->todo);
 	if (target_wait)
+		// 将目标进程target_proc或者目标线程target_thread唤醒，以便它们可以处理这个工作项。
 		wake_up_interruptible(target_wait);
+	// 如果目标todo队列target_list指向的是一个Binder实体对象的异步事务队列async_todo，
+	// 那么目标wait等待队列target_wait就会等于NULL，
+	// 这时候就不需要将目标进程target_proc或者目标线程target_thread唤醒了.
 	return;
 
 err_get_unused_fd_failed:
@@ -1824,7 +1947,7 @@ binder_transaction_buffer_release(struct binder_proc *proc, struct binder_buffer
 	}
 }
 
-/* 函数 binder_thread_write 处理 BC_ENTER_LOOPER 协议;
+/* 函数 binder_thread_write 处理 BC_ENTER_LOOPER/BC_FREE_BUFFER 协议;
  * @buffer: 指向进程传递给Binder驱动程序的一个binder_read_write结构体的输出缓冲区write_buffer;
  */
 int
@@ -2250,6 +2373,9 @@ binder_has_thread_work(struct binder_thread *thread)
 		(thread->looper & BINDER_LOOPER_STATE_NEED_RETURN);
 }
 
+/**
+ * 函数binder_thread_read: 负责处理一个线程或者一个进程的todo队列中的工作项。处理完成之后，它就会向目标进程发送一个返回协议。
+ */
 static int
 binder_thread_read(struct binder_proc *proc, struct binder_thread *thread,
 	void  __user *buffer, int size, signed long *consumed, int non_block)
@@ -2341,8 +2467,12 @@ retry:
 		struct binder_work *w;
 		struct binder_transaction *t = NULL;
 
+		// 检查线程thread自己的todo队列中是否有工作项需要处理;
 		if (!list_empty(&thread->todo))
+			// 将线程 thread 的 todo 队列中类型为 BINDER_WORK_TRANSACTION_COMPLETE 的工作项取出来.
 			w = list_first_entry(&thread->todo, struct binder_work, entry);
+		// 检查它所属进程proc的todo队列中是否有工作项需要处理;
+		// 只要其中的一个todo队列中有工作项需要处理，函数binder_thread_read就将它取出来处理，并且保存在binder_work结构体w中。
 		else if (!list_empty(&proc->todo) && wait_for_proc_work)
 			w = list_first_entry(&proc->todo, struct binder_work, entry);
 		else {
@@ -2356,10 +2486,15 @@ retry:
 
 		switch (w->type) {
 		case BINDER_WORK_TRANSACTION: {
+			// 由于binder_work结构体w的类型为BINDER_WORK_TRANSACTION，即它是一个嵌入在一个binder_transaction结构体中的工作项，
+			// 因此，下面就可以安全地将它转换为一个binder_transaction结构体t。
 			t = container_of(w, struct binder_transaction, work);
 		} break;
 		case BINDER_WORK_TRANSACTION_COMPLETE: {
 			cmd = BR_TRANSACTION_COMPLETE;
+			// 将一个BR_TRANSACTION_COMPLETE返回协议写入到用户空间提供的缓冲区中。
+			// 从这里可以看出，Binder驱动程序处理类型为BINDER_WORK_TRANSACTION_COMPLETE的工作项的方式是
+			// 向相应的进程发送一个BR_TRANSACTION_COMPLETE返回协议。
 			if (put_user(cmd, (uint32_t __user *)ptr))
 				return -EFAULT;
 			ptr += sizeof(uint32_t);
@@ -2471,12 +2606,25 @@ retry:
 		BUG_ON(t->buffer == NULL);
 		if (t->buffer->target_node) {
 			struct binder_node *target_node = t->buffer->target_node;
+			// 将目标Binder本地对象信息复制到binder_transaction_data结构体tr中，
+			// 以便目标线程thread接收到Binder驱动程序给它发送的BR_TRANSACTION返回协议之后，
+			// 可以将该返回协议交给指定的Binder本地对象来处理。
 			tr.target.ptr = target_node->ptr;
 			tr.cookie =  target_node->cookie;
+			// 首先将它原来的线程优先级保存在binder_transaction结构体t的成员变量saved_priority中，
+			// 以便它处理完成该进程间通信请求之后，Binder驱动程序可以恢复它原来的线程优先级。
 			t->saved_priority = task_nice(current);
+			// 如果binder_transaction结构体t描述的是一个同步的进程间通信请求，
+			// 并且源线程的线程优先级 t-＞priority 高于目标 Binder 实体对象 target_node 所要求的最小线程优先级 min_priority;
+			// 就将目标线程thread的线程优先级设置为源线程的线程优先级;
 			if (t->priority < target_node->min_priority &&
 			    !(t->flags & TF_ONE_WAY))
 				binder_set_nice(t->priority);
+			// 当binder_transaction结构体t描述的是一个异步的进程间通信请求时,
+			// 那么Binder驱动程序在修改目标线程thread的线程优先级时，就不需要考虑源线程的线程优先级了。
+			// 这是因为源线程不需要等待目标线程的进程间通信结果。因此，Binder驱动程序就不需要将目标线程模拟成源线程来执行。
+			// 但是，需要进一步检查目标Binder实体对象target_node的最小线程优先级min_priority是否高于目标线程thread的线程优先级。
+			// 如果是，那么就将目标线程thread的线程优先级设置为目标Binder实体对象target_node的最小线程优先级min_priority。
 			else if (!(t->flags & TF_ONE_WAY) ||
 				 t->saved_priority > target_node->min_priority)
 				binder_set_nice(target_node->min_priority);
@@ -2486,8 +2634,13 @@ retry:
 			tr.cookie = NULL;
 			cmd = BR_REPLY;
 		}
+		// 将binder_transaction结构体t中的进程间通信数据复制到binder_transaction_data结构体tr中。
+		// eg: 复制到binder_transaction_data结构体tr中的成员变量code和flags的值分别为ADD_SERVICE_TRANSACTION和TF_ACCEPT_FDS。
 		tr.code = t->code;
 		tr.flags = t->flags;
+		// 设置binder_transaction_data结构体tr的成员变量sender_euid和sender_pid，
+		// 它们分别指向源线程的有效用户ID，以及线程组PID，这样目标线程thread在处理一个进程间通信请求时，
+		// 就可以识别出源线程的身份，以便做一些安全性和合法性检查。
 		tr.sender_euid = t->sender_euid;
 
 		if (t->from) {
@@ -2497,11 +2650,14 @@ retry:
 			tr.sender_pid = 0;
 		}
 
+		// 将binder_transaction结构体t中的数据缓冲区和偏移数组的内容复制到binder_transaction_data结构体tr中。
 		tr.data_size = t->buffer->data_size;
 		tr.offsets_size = t->buffer->offsets_size;
 		tr.data.ptr.buffer = (void *)t->buffer->data + proc->user_buffer_offset;
 		tr.data.ptr.offsets = tr.data.ptr.buffer + ALIGN(t->buffer->data_size, sizeof(void *));
 
+		// binder_transaction_data结构体tr的进程间通信数据设置完成之后，
+		// 将它以及它所对应的返回协议 BR_TRANSACTION 复制到由目标线程 thread 提供的一个用户空间缓冲区中。
 		if (put_user(cmd, (uint32_t __user *)ptr))
 			return -EFAULT;
 		ptr += sizeof(uint32_t);
@@ -2520,13 +2676,22 @@ retry:
 			       t->buffer->data_size, t->buffer->offsets_size,
 			       tr.data.ptr.buffer, tr.data.ptr.offsets);
 
+		// 将binder_work结构体w从目标线程thread或者目标进程的todo队列中删除，因为它所描述的工作项已经得到处理了。
 		list_del(&t->work.entry);
+		// 将binder_transaction结构体t的成员变量allow_user_free的值设置为1，
+		// 表示Binder驱动程序为它所分配的内核缓冲区允许目标线程thread在用户空间中发出BC_FREE_BUFFER命令协议来释放。
 		t->buffer->allow_user_free = 1;
+		// 如果Binder驱动程序向目标线程thread发送的是一个BR_TRANSACTION返回协议，并且binder_transaction结构体t的成员变量flags的TF_ONE_WAY位等于0;
+		// 那么就说明Binder驱动程序正在请求目标线程thread执行一个同步的进程间通信请求。
 		if (cmd == BR_TRANSACTION && !(t->flags & TF_ONE_WAY)) {
+			// 将binder_transaction结构体t压入到目标线程thread的事务堆栈transaction_stack中，
+			// 以便Binder驱动程序以后可以从目标线程thread所属进程的Binder线程池中选择一个最优的空闲Binder线程来处理其他的进程间通信请求。
 			t->to_parent = thread->transaction_stack;
 			t->to_thread = thread;
 			thread->transaction_stack = t;
 		} else {
+			// 如果Binder驱动程序正在处理的不是一个同步的进程间通信请求，就释放binder_transaction结构体t所占用的内核空间；
+			// 否则，就需要等到该同步的进程间通信请求处理完成之后，才可以释放binder_transaction结构体t所占用的内核空间。
 			t->buffer->transaction = NULL;
 			kfree(t);
 			binder_stats.obj_deleted[BINDER_STAT_TRANSACTION]++;
