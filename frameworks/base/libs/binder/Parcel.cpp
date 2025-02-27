@@ -1193,19 +1193,31 @@ size_t Parcel::ipcObjectsCount() const
     return mObjectsSize;
 }
 
+/**
+ * Parcel::ipcSetDataReference
+ * @data: 指向了用来保存进程间通信结果数据的缓冲区，它的大小由参数dataSize来描述;
+ * @objects: 指向了一个Binder对象偏移数组，用来描述保存在进程间通信数据缓冲区中的Binder对象的位置，它的大小由参数objectsCount来描述;
+ * @relFunc: 是一个函数指针，它指向了IPCThreadState类的成员函数freeBuffer；
+ * @relCookie: 指向了当前线程的IPCThreadState对象;
+ */
 void Parcel::ipcSetDataReference(const uint8_t* data, size_t dataSize,
     const size_t* objects, size_t objectsCount, release_func relFunc, void* relCookie)
 {
+    // 调用函数freeDataNoInit来释放当前Parcel对象内部的数据缓冲区所占用的内存;
     freeDataNoInit();
+    // 重新初始化当前Parcel对象内部所使用的数据缓冲区。
     mError = NO_ERROR;
+    // 将该缓冲区作为当前Parcel对象内部使用的数据缓冲区。
     mData = const_cast<uint8_t*>(data);
     mDataSize = mDataCapacity = dataSize;
     //LOGI("setDataReference Setting data size of %p to %lu (pid=%d)\n", this, mDataSize, getpid());
     mDataPos = 0;
     LOGV("setDataReference Setting data pos of %p to %d\n", this, mDataPos);
+    // 将该偏移数组作为当前Parcel对象内部使用的偏移数组;
     mObjects = const_cast<size_t*>(objects);
     mObjectsSize = mObjectsCapacity = objectsCount;
     mNextObjectHint = 0;
+    // 将它们(relFunc和relCookie)保存在当前Parcel对象的成员变量mOwner和mOwnerCookie中
     mOwner = relFunc;
     mOwnerCookie = relCookie;
     scanForFds();

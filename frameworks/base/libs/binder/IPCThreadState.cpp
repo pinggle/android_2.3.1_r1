@@ -673,6 +673,7 @@ status_t IPCThreadState::waitForResponse(Parcel *reply, status_t *acquireResult)
         
         // IPCThreadState类的成员函数talkWithDriver已经将Binder驱动程序给进程发送的 BR_TRANSACTION_COMPLETE 返回协议
         // 保存在内部的返回协议缓冲区mIn中，因此，下面就可以通过返回协议缓冲区mIn来获得这个 BR_TRANSACTION_COMPLETE 返回协议。
+        // 2.从返回协议缓冲区mIn中读出一个BR_REPLY返回协议代码。
         cmd = mIn.readInt32();
         
         IF_LOG_COMMANDS() {
@@ -713,12 +714,18 @@ status_t IPCThreadState::waitForResponse(Parcel *reply, status_t *acquireResult)
         case BR_REPLY:
             {
                 binder_transaction_data tr;
+                // 将返回协议缓冲区mIn的内容读到一个binder_transaction_data结构体tr中。
                 err = mIn.read(&tr, sizeof(tr));
                 LOG_ASSERT(err == NO_ERROR, "Not enough command data for brREPLY");
                 if (err != NO_ERROR) goto finish;
 
                 if (reply) {
                     if ((tr.flags & TF_STATUS_CODE) == 0) {
+                        // 如果binder_transaction_data结构体tr的成员变量flags的TF_STATUS_CODE位等于0，
+                        // 就说明当前线程之前所发出的一个进程间通信请求已经被成功地处理了。
+
+                        // 下面就就将保存在binder_transaction_data结构体tr中的进程间通信结果保存在Parcel对象reply中，
+                        // 这是通过调用Parcel对象reply的成员函数ipcSetDataReference来实现的。
                         reply->ipcSetDataReference(
                             reinterpret_cast<const uint8_t*>(tr.data.ptr.buffer),
                             tr.data_size,
