@@ -66,6 +66,8 @@ public:
 protected:
     virtual bool threadLoop()
     {
+        // 调用当前线程中的IPCThreadState对象的成员函数joinThreadPool，
+        // 将当前线程注册到Binder驱动程序中去成为一个Binder线程，以便Binder驱动程序可以分发进程间通信请求给它处理。
         IPCThreadState::self()->joinThreadPool(mIsMain);
         return false;
     }
@@ -160,6 +162,9 @@ bool ProcessState::supportsProcesses() const
 void ProcessState::startThreadPool()
 {
     AutoMutex _l(mLock);
+    // 当前进程的ProcessState对象的成员变量mThreadPoolStarted被初始化为false，
+    // 当它将一个Binder线程池启动起来之后，就会将内部的成员变量mThreadPoolStarted的值设置为true，
+    // 防止它的成员函数 spawnPooledThread 被重复调用来启动Binder线程池。
     if (!mThreadPoolStarted) {
         mThreadPoolStarted = true;
         spawnPooledThread(true);
@@ -326,6 +331,11 @@ void ProcessState::setArgV0(const char* txt)
     }
 }
 
+/**
+ * spawnPooledThread:
+ * @isMain: true，表示线程 t 是进程主动创建来加入到它的Binder线程池的，
+ *          以区别于Binder驱动程序请求进程创建新的线程来加入到它的Binder线程池的情况。
+ */
 void ProcessState::spawnPooledThread(bool isMain)
 {
     if (mThreadPoolStarted) {
@@ -333,6 +343,9 @@ void ProcessState::spawnPooledThread(bool isMain)
         char buf[32];
         sprintf(buf, "Binder Thread #%d", s);
         LOGV("Spawning new pooled thread, name=%s\n", buf);
+        // 创建了一个PoolThread对象t，接着调用它的成员函数run来启动一个新的线程。
+        // PoolThread类继承了线程类Thread，并且重写了它的线程入口成员函数threadLoop，
+        // 因此，当一个PoolThread对象t所对应的线程启动起来之后，它的成员函数threadLoop就会被调用。
         sp<Thread> t = new PoolThread(isMain);
         t->run(buf);
     }

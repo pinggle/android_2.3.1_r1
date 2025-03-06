@@ -12,5 +12,6 @@
         "stdlib.h": "c",
         "binder.h": "c",
         "string": "cpp"
-    }
+    },
+    "java.compile.nullAnalysis.mode": "automatic"
 }

@@ -18,6 +18,8 @@ int main()
 
 	// 将前面获得的 BpBinder 代理对象封装成一个 BpFregService 代理对象，并且取得它的 IFregService接口，保存在变量 service 中。
 	// IFregService::asInterface 用来将一个 IBinder 对象转换为一个 IFregService 接口;
+	// 通过IFregService类的静态成员函数asInterface将它封装成一个BpFregService类型的代理对象，
+	// 并且获得它的一个IFregService接口，最后就可以通过这个接口来向运行在FregServer进程中的Service组件FregService发送进程间通信请求了。
 	sp<IFregService> service = IFregService::asInterface(binder);
 	if(service == NULL) {
 		LOGE("Failed to get freg service interface.\n");

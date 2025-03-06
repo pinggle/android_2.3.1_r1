@@ -157,11 +157,18 @@ uint16_t svcmgr_id[] = {
 void *do_find_service(struct binder_state *bs, uint16_t *s, unsigned len)
 {
     struct svcinfo *si;
+    // 调用函数 find_svc 来查找与字符串s对应的一个svcinfo结构体si;
     si = find_svc(s, len);
 
 //    LOGI("check_service('%s') ptr = %p\n", str8(s), si ? si->ptr : 0);
+    // 如果找到了与字符串s对应的svcinfo结构体si，并且它的成员变量ptr的值不为0，
+    // 那么就将它的成员变量ptr的值返回给调用者。
     if (si && si->ptr) {
         return si->ptr;
+        // 结构体svcinfo的成员变量ptr保存的是一个引用了注册到Service Manager中的Service组件的Binder引用对象的句柄值。
+        // 当Service Manager将这个句柄值返回给Binder驱动程序时，Binder驱动程序就可以根据它找到相应的Binder引用对象，
+        // 接着找到该Binder引用对象所引用的Binder实体对象，
+        // 最后Binder驱动程序就可以在请求获取该Service组件的代理对象的Client进程中创建另一个Binder引用对象了。
     } else {
         return 0;
     }
@@ -281,11 +288,17 @@ int svcmgr_handler(struct binder_state *bs,
     switch(txn->code) {
     case SVC_MGR_GET_SERVICE:
     case SVC_MGR_CHECK_SERVICE:
+        // 处理操作代码为CHECK_SERVICE_TRANSACTION的进程间通信请求;
+        // 调用函数 bio_get_string16 将它(服务组件的名称)从binder_io结构体msg的数据缓冲区中获取回来;
         s = bio_get_string16(msg, &len);
+        // 调用函数 do_find_service 在已注册Service组件列表svclist中查找与它对应的一个svcinfo结构体。
         ptr = do_find_service(bs, s, len);
         if (!ptr)
             break;
+        // 将前面获得的一个句柄值封装成一个binder_object结构体，并且写入到binder_io结构体reply中，
+        // 以便可以将它返回给Binder驱动程序，这是通过调用函数bio_put_ref来实现的。
         bio_put_ref(reply, ptr);
+        // 到此，现在要返回给Binder驱动程序的进程间通信结果数据都保存在 binder_io 结构体reply中了;
         return 0;
 
     case SVC_MGR_ADD_SERVICE:

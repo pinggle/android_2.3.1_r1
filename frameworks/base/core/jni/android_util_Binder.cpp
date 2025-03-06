@@ -48,6 +48,8 @@ using namespace android;
 
 static struct bindernative_offsets_t
 {
+    // mClass指向Java层中的Binder类，
+    // 而mExecTransact和mObject分别指向这个Binder类的成员函数execTransact和成员变量mObject。
     // Class state.
     jclass mClass;
     jmethodID mExecTransact;
@@ -56,6 +58,7 @@ static struct bindernative_offsets_t
     jfieldID mObject;
 
 } gBinderOffsets;
+// 全局变量gBinderOffsets是在函数 int_register_android_os_Binder 中初始化的;
 
 // ----------------------------------------------------------------------------
 
@@ -80,6 +83,8 @@ static struct debug_offsets_t
 
 static struct weakreference_offsets_t
 {
+    // 它有两个成员变量：mClass和mGet，其中，
+    // mClass指向Java层中的 WeakReference 类，而mGet指向这个WeakReference类的成员函数 get。
     // Class state.
     jclass mClass;
     jmethodID mGet;
@@ -95,6 +100,9 @@ static struct error_offsets_t
 
 static struct binderproxy_offsets_t
 {
+    // mClass指向Java层中的BinderProxy类，
+    // 而 mConstructor、mSendDeathNotice、mObject 和 mSelf 分别指向
+    // 这个 BinderProxy 类的构造函数、静态成员函数 sendDeathNotice、成员变量 mObject 和 mSelf;
     // Class state.
     jclass mClass;
     jmethodID mConstructor;
@@ -105,6 +113,7 @@ static struct binderproxy_offsets_t
     jfieldID mSelf;
 
 } gBinderProxyOffsets;
+// 全局变量gBinderProxyOffsets是在函数int_register_android_os_BinderProxy中初始化的;
 
 // ----------------------------------------------------------------------------
 
@@ -676,6 +685,7 @@ static int int_register_android_os_Binder(JNIEnv* env)
     clazz = env->FindClass(kBinderPathName);
     LOG_FATAL_IF(clazz == NULL, "Unable to find class android.os.Binder");
 
+    // 全局变量 gBinderOffsets 初始化;
     gBinderOffsets.mClass = (jclass) env->NewGlobalRef(clazz);
     gBinderOffsets.mExecTransact
         = env->GetMethodID(clazz, "execTransact", "(IIII)Z");

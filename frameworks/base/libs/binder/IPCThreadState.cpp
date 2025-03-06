@@ -406,10 +406,23 @@ void IPCThreadState::flushCommands()
     talkWithDriver(false);
 }
 
+/**
+ * IPCThreadState::joinThreadPool: 将当前线程注册到Binder驱动程序中去成为一个Binder线程，
+ *                                  以便Binder驱动程序可以分发进程间通信请求给它处理。
+ * 
+ * 一个Binder线程的生命周期可以划分为三个阶段：
+ *  第一阶段是将自己注册到Binder线程池中；
+ *  第二个阶段是在一个无限循环中不断地等待和处理进程间通信请求；
+ *  第三个阶段是退出Binder线程池。
+ * 
+ */
 void IPCThreadState::joinThreadPool(bool isMain)
 {
     LOG_THREADPOOL("**** THREAD %p (PID %d) IS JOINING THE THREAD POOL\n", (void*)pthread_self(), getpid());
 
+    // 根据参数isMain的值不同，相应地将一个BC_ENTER_LOOPER或者BC_REGISTER_LOOPER命令协议
+    // 写入到IPCThreadState类内部的命令协议缓冲区mOut中，以便接下来可以调用成员函数talkWithDriver将
+    // 它里面的BC_ENTER_LOOPER或者BC_REGISTER_LOOPER命令协议发送给Binder驱动程序，从而完成注册Binder线程的过程。
     mOut.writeInt32(isMain ? BC_ENTER_LOOPER : BC_REGISTER_LOOPER);
     
     // This thread may have been spawned by a thread that was in the background
@@ -418,6 +431,18 @@ void IPCThreadState::joinThreadPool(bool isMain)
     androidSetThreadSchedulingGroup(mMyThreadId, ANDROID_TGROUP_DEFAULT);
         
     status_t result;
+    // while循环不断地调用IPCThreadState类的成员函数talkWithDriver来和Binder驱动程序交互，
+    // 这是通过IO控制命令BINDER_WRITE_READ实现的。
+    // 在进入Binder驱动程序之前，IPCThreadState类的成员函数talkWithDriver会检查内部的命令协议缓冲区mOut
+    // 是否有命令协议，如果有，就会将它们发送给Binder驱动程序处理。
+    // 从Binder驱动程序返回之后，如果Binder驱动程序给它分发了返回协议，
+    // 那么IPCThreadState类的成员函数talkWithDriver就会将它们保存在内部的返回协议缓冲区mIn中，
+    // 接着调用成员函数executeCommand来处理它们。
+
+    // 如果IPCThreadState类的成员函数talkWithDriver长时间没有等到进程间通信请求，
+    // 或者成员函数executeCommand在处理一个进程间通信请求时发生超时，即变量result的值等于TIMED_OUT，
+    // 并且当前线程不是进程主动创建来处理进程间通信请求的，即参数isMain的值等于false，那么就跳出while循环。
+    // 最后，当前线程就通过向Binder驱动程序发送一个BC_EXIT_LOOPER命令协议，通知Binder驱动程序它要退出Binder线程池了。
     do {
         int32_t cmd;
         
@@ -468,6 +493,10 @@ void IPCThreadState::joinThreadPool(bool isMain)
 
         // Let this thread exit the thread pool if it is no longer
         // needed and it is not the main process thread.
+        // 如果IPCThreadState类的成员函数talkWithDriver长时间没有等到进程间通信请求，
+        // 或者成员函数executeCommand在处理一个进程间通信请求时发生超时，即变量result的值等于TIMED_OUT，
+        // 并且当前线程不是进程主动创建来处理进程间通信请求的，即参数isMain的值等于false，
+        // 那么就跳出while循环。
         if(result == TIMED_OUT && !isMain) {
             break;
         }
@@ -476,6 +505,7 @@ void IPCThreadState::joinThreadPool(bool isMain)
     LOG_THREADPOOL("**** THREAD %p (PID %d) IS LEAVING THE THREAD POOL err=%p\n",
         (void*)pthread_self(), getpid(), (void*)result);
     
+    // 当前线程就通过下面的代码向Binder驱动程序发送一个BC_EXIT_LOOPER命令协议，通知Binder驱动程序它要退出Binder线程池了。
     mOut.writeInt32(BC_EXIT_LOOPER);
     talkWithDriver(false);
 }

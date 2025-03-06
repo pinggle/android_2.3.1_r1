@@ -1725,6 +1725,7 @@ binder_transaction(struct binder_proc *proc, struct binder_thread *thread,
 		} break;
 		case BINDER_TYPE_HANDLE:
 		case BINDER_TYPE_WEAK_HANDLE: {
+			// 根据flat_binder_object结构体fp的句柄值在进程proc中找到对应的Binder引用对象ref;
 			struct binder_ref *ref = binder_get_ref(proc, fp->handle);
 			if (ref == NULL) {
 				binder_user_error("binder: %d:%d got "
@@ -1746,13 +1747,27 @@ binder_transaction(struct binder_proc *proc, struct binder_thread *thread,
 					printk(KERN_INFO "        ref %d desc %d -> node %d u%p\n",
 					       ref->debug_id, ref->desc, ref->node->debug_id, ref->node->ptr);
 			} else {
+				// 由于Binder引用对象ref所引用的Binder本地对象是运行在FregServer进程中的Service组件FregService，
+				// 而目标进程target_proc指向了要获取Service组件FregService的代理对象的FregClient进程;
 				struct binder_ref *new_ref;
+				// 调用函数binder_get_ref_for_node在FregClient进程中查找是否已经存在一个Binder引用对象，
+				// 它引用了Binder实体对象ref-＞node，即引用了Service组件FregService。
+				// 如果不存在，那么函数binder_get_ref_for_node就会为FregClient进程创建一个引用了Service组件FregService的Binder引用对象，
+				// 并且返回给调用者；否则，就直接将该Binder引用对象返回给调用者。
 				new_ref = binder_get_ref_for_node(target_proc, ref->node);
 				if (new_ref == NULL) {
 					return_error = BR_FAILED_REPLY;
 					goto err_binder_get_ref_for_node_failed;
 				}
+				// 将flat_binder_object结构体fp的句柄值修改为FregClient进程创建的一个Binder引用对象new_ref的句柄值。
+				// 因为接下来Binder驱动程序需要将flat_binder_object结构体fp返回给FregClient进程，
+				// 以便FregClient进程可以根据这个句柄值创建一个引用了Service组件FregService的Binder代理对象。
 				fp->handle = new_ref->desc;
+				// 调用函数binder_inc_ref增加Binder引用对象new_ref的引用计数，
+				// 因为它被保存在binder_transaction结构体t的内核缓冲区buffer中，
+				// 即被binder_transaction结构体t的内核缓冲区buffer引用了。
+				// 等到binder_transaction结构体t的内核缓冲区buffer被释放时，
+				// Binder驱动程序就会相应地减少Binder引用对象new_ref的引用计数。
 				binder_inc_ref(new_ref, fp->type == BINDER_TYPE_HANDLE, NULL);
 				if (binder_debug_mask & BINDER_DEBUG_TRANSACTION)
 					printk(KERN_INFO "        ref %d desc %d -> ref %d desc %d (node %d)\n",

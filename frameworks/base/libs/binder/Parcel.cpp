@@ -248,6 +248,8 @@ status_t unflatten_binder(const sp<ProcessState>& proc,
     if (flat) {
         switch (flat->type) {
             case BINDER_TYPE_BINDER:
+                // 调用当前进程的 ProcessState 对象 proc 的成员函数 getStrongProxyForHandle 来查找一个
+                // 与它的句柄值相对应的Binder代理对象，即一个 BpBinder 对象。
                 *out = static_cast<IBinder*>(flat->cookie);
                 return finish_unflatten_binder(NULL, *flat, in);
             case BINDER_TYPE_HANDLE:
@@ -1000,6 +1002,10 @@ const char16_t* Parcel::readString16Inplace(size_t* outLen) const
 sp<IBinder> Parcel::readStrongBinder() const
 {
     sp<IBinder> val;
+    // 从前面的调用过程可以知道，
+    // Parcel对象reply内部的数据缓冲区保存了Binder驱动程序返回给当前线程的进程间通信结果数据，
+    // 即它里面包含了一个类型为 BINDER_TYPE_HANDLE 的 flat_binder_object 结构体，
+    // 因此，下面就调用函数 unflatten_binder 来获得这个 flat_binder_object 结构体。
     unflatten_binder(ProcessState::self(), *this, &val);
     return val;
 }

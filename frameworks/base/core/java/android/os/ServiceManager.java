@@ -20,6 +20,7 @@ import com.android.internal.os.BinderInternal;
 
 import android.util.Log;
 
+import java.rmi.RemoteException;
 import java.util.HashMap;
 import java.util.Map;
 
@@ -36,6 +37,9 @@ public final class ServiceManager {
         }
 
         // Find the service manager
+        // 首先通过BinderInternal类的静态成员函数getContextObject创建一个句柄值等于0的Java服务代理对象，
+        // 接着再通过ServiceManagerNative类的静态成员函数asInterface将这个Java服务代理对象封装成一个ServiceManagerProxy对象，
+        // 最后保存在静态成员变量sServiceManager中，并且将它返回给调用者。
         sServiceManager = ServiceManagerNative.asInterface(BinderInternal.getContextObject());
         return sServiceManager;
     }

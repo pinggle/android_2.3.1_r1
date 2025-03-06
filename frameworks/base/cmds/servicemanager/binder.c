@@ -562,8 +562,11 @@ static struct binder_object *bio_alloc_obj(struct binder_io *bio)
 {
     struct binder_object *obj;
 
+    // 调用函数bio_alloc在binder_io结构体bio的数据缓冲区中分配一个未初始化的binder_object结构体obj;
     obj = bio_alloc(bio, sizeof(*obj));
     
+    // 在binder_io结构体bio的偏移数组中分配一个元素来保存binder_object结构体obj在数据缓冲区中的位置。
+    // 这样Binder驱动程序就可以知道Service Manager给它返回的进程间通信结果数据中包含了一个Binder对象。
     if (obj && bio->offs_avail) {
         bio->offs_avail--;
         *bio->offs++ = ((char*) obj) - ((char*) bio->data0);
@@ -600,6 +603,7 @@ void bio_put_ref(struct binder_io *bio, void *ptr)
     struct binder_object *obj;
 
     if (ptr)
+        // 调用函数bio_alloc_obj在binder_io结构体bio的数据缓冲区中分配一个binder_object结构体obj。
         obj = bio_alloc_obj(bio);
     else
         obj = bio_alloc(bio, sizeof(*obj));
@@ -607,8 +611,11 @@ void bio_put_ref(struct binder_io *bio, void *ptr)
     if (!obj)
         return;
 
+    // 对前面从binder_io结构体bio的数据缓冲区中分配的binder_object结构体obj进行初始化。
     obj->flags = 0x7f | FLAT_BINDER_FLAG_ACCEPTS_FDS;
+    // 将binder_object结构体obj所描述的Binder对象的类型设置为 BINDER_TYPE_HANDLE ;
     obj->type = BINDER_TYPE_HANDLE;
+    // 将这个Binder对象的句柄值设置为ptr;
     obj->pointer = ptr;
     obj->cookie = 0;
 }
