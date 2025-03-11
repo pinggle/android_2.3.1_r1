@@ -69,7 +69,10 @@ import android.view.accessibility.AccessibilityEvent;
 import android.widget.AdapterView;
 import android.widget.FrameLayout;
 import android.widget.LinearLayout;
+import javafx.application.Application;
+import javafx.scene.control.Dialog;
 
+import java.lang.instrument.Instrumentation;
 import java.util.ArrayList;
 import java.util.HashMap;
 
@@ -2824,10 +2827,37 @@ public class Activity extends ContextThemeWrapper
      */
     public void startActivityForResult(Intent intent, int requestCode) {
         if (mParent == null) {
+            // Activity类的成员变量mInstrumentation的类型为 Intrumentation，
+            // 它用来监控应用程序和系统之间的交互操作。
+            // 由于启动Activity组件是应用程序与系统之间的一个交互操作，
+            // 因此，就调用它的成员函数execStartActivity来代为执行启动Activity组件的操作，
+            // 以便它可以监控这个交互过程。
             Instrumentation.ActivityResult ar =
                 mInstrumentation.execStartActivity(
                     this, mMainThread.getApplicationThread(), mToken, this,
                     intent, requestCode);
+            // Activity类的成员变量mMainThread的类型为ActivityThread，
+            // 用来描述一个应用程序进程。系统每当启动一个应用程序进程时，都
+            // 会在它里面加载一个ActivityThread类实例，并且会将这个
+            // ActivityThread类实例保存在每一个在该进程中启动的Activity组件的
+            // 父类Activity的成员变量mMainThread中。ActivityThread类的成员
+            // 函数getApplicationThread用来获取它内部的一个类型为
+            // ApplicationThread的Binder本地对象。
+
+            // 将Launcher组件所运行在的应用程序进程的ApplicationThread对象
+            // 作为参数传递给成员变量mInstrumentation的成员函数execStartActivity，
+            // 以便可以将它传递给ActivityManagerService，这样ActivityManagerService接下来
+            // 就可以通过它来通知Launcher组件进入Paused状态了。
+
+            // Activity类的成员变量mToken的类型为IBinder，它是一个
+            // Binder代理对象，指向了ActivityManagerService中一个类型为
+            // ActivityRecord的Binder本地对象。每一个已经启动的Activity组件在
+            // ActivityManagerService中都有一个对应的ActivityRecord对象，用来
+            // 维护对应的Activity组件的运行状态以及信息。
+            
+            // 将Launcher组件的成员变量mToken作为参数传递给成员变量mInstrumentation的
+            // 成员函数execStartActivity，以便可以将它传递给ActivityManagerService，
+            // 这样ActivityManagerService接下来就可以获得Launcher组件的详细信息了。
             if (ar != null) {
                 mMainThread.sendActivityResult(
                     mToken, mEmbeddedID, requestCode, ar.getResultCode(),
@@ -2930,6 +2960,9 @@ public class Activity extends ContextThemeWrapper
      */
     @Override
     public void startActivity(Intent intent) {
+        // 调用成员函数startActivityForResult来启动参数intent所
+        // 描述的Activity组件，其中，第二个参数设置为-1，表示Launcher组
+        // 件不需要知道即将启动的Actvity组件的执行结果。
         startActivityForResult(intent, -1);
     }
 

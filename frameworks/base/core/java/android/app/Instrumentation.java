@@ -16,6 +16,7 @@
 
 package android.app;
 
+import android.app.Instrumentation.ActivityResult;
 import android.content.ActivityNotFoundException;
 import android.content.ComponentName;
 import android.content.Context;
@@ -42,6 +43,7 @@ import android.view.MotionEvent;
 import android.view.ViewConfiguration;
 import android.view.Window;
 import android.view.inputmethod.InputMethodManager;
+import javafx.application.Application;
 
 import java.io.File;
 import java.util.ArrayList;
@@ -1370,6 +1372,10 @@ public class Instrumentation {
             }
         }
         try {
+            // 首先调用ActivityManagerNative类的静态成员函数getDefault来
+            // 获得ActivityManagerService的一个代理对象，
+            // 接着再调用它的成员函数startActivity来通知ActivityManagerService
+            // 将一个Activity组件启动起来。
             int result = ActivityManagerNative.getDefault()
                 .startActivity(whoThread, intent,
                         intent.resolveTypeIfNeeded(who.getContentResolver()),
