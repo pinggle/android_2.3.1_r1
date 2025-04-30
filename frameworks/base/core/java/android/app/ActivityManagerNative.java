@@ -45,6 +45,8 @@ import android.util.Log;
 import java.util.ArrayList;
 import java.util.List;
 
+import javax.management.Notification;
+
 /** {@hide} */
 public abstract class ActivityManagerNative extends Binder implements IActivityManager
 {
@@ -76,6 +78,8 @@ public abstract class ActivityManagerNative extends Binder implements IActivityM
             //    "ActivityManager", "returning cur default = " + gDefault);
             return gDefault;
         }
+        // 通过Service Manager来获得一个名称为“activity”的Java服务代理对象，
+        // 即获得一个引用了ActivityManagerService的代理对象。
         IBinder b = ServiceManager.getService("activity");
         if (Config.LOGV) Log.v(
             "ActivityManager", "default service binder = " + b);

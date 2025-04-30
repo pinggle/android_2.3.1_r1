@@ -783,6 +783,7 @@ class PackageManagerService extends IPackageManager.Stub {
             mHandlerThread.start();
             mHandler = new PackageHandler(mHandlerThread.getLooper());
 
+            // 获得系统的数据目录/data;
             File dataDir = Environment.getDataDirectory();
             mAppDataDir = new File(dataDir, "data");
             mSecureAppDataDir = new File(dataDir, "secure/data");
